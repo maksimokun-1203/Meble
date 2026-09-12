@@ -1,0 +1,7 @@
+backend/__pycache__/
+backend/viyar_app.db
+backend/uploads/
+.env
+backend/fix.py
+backend/migrate*.py
+frontend/patch_app.py

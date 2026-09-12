@@ -161,11 +161,8 @@ async function loadProjectsDashboard() {
         
         card.className = "bg-white rounded-2xl p-4 shadow-sm border border-slate-100 hover:border-indigo-300 hover:shadow-md cursor-pointer transition-all flex flex-col gap-2";
         card.onclick = () => {
+            openTab('main');
             openProject(p.id);
-            // reset to main tiles only when entering from dashboard
-            if (state.currentProject && state.currentProject.id !== p.id) {
-                openTab('main');
-            }
         }
         
         card.innerHTML = `
@@ -208,17 +205,17 @@ function openTab(tabName) {
     document.getElementById('tab-info').classList.add('hidden-page');
     document.getElementById('tab-checklist').classList.add('hidden-page');
     
-    const tilesGrid = document.querySelector('.grid.grid-cols-2.gap-3');
+    const tilesGrid = document.getElementById('pd-tiles');
     
     if (tabName === 'main') {
-        tilesGrid.style.display = 'grid';
+        if (tilesGrid) tilesGrid.style.display = 'grid';
         state.currentTabCategory = null;
     } else if (tabName === 'info') {
-        tilesGrid.style.display = 'none';
+        if (tilesGrid) tilesGrid.style.display = 'none';
         document.getElementById('tab-info').classList.remove('hidden-page');
         state.currentTabCategory = null;
     } else {
-        tilesGrid.style.display = 'none';
+        if (tilesGrid) tilesGrid.style.display = 'none';
         document.getElementById('tab-checklist').classList.remove('hidden-page');
         let title = '';
         let cat = '';
@@ -236,9 +233,10 @@ function renderChecklist(category) {
     container.innerHTML = '';
     
     const isPrivileged = state.currentUser && (state.currentUser.role === 'Admin' || state.currentUser.role === 'Developer');
+    const canAdd = state.currentUser && state.currentUser.role !== 'Підрядник' && state.currentUser.role !== 'Contractor';
     
     // Explicitly hide/show
-    if (isPrivileged) {
+    if (canAdd) {
         document.getElementById('add-item-btn').style.display = 'block';
     } else {
         document.getElementById('add-item-btn').style.display = 'none';
@@ -310,14 +308,28 @@ function renderProjectDetails(p) {
     const isPrivileged = state.currentUser && (state.currentUser.role === 'Admin' || state.currentUser.role === 'Developer');
     statusSelect.disabled = !isPrivileged;
     
-    const adminControls = document.getElementById('pd-admin-controls');
+    // Client Info Update
+    document.getElementById('pd-client-name').innerHTML = `<i class="fa-solid fa-user w-5 text-center mr-1"></i><span>${p.client_name || 'Не вказано'}</span>`;
+    document.getElementById('pd-client-phone').innerHTML = `<i class="fa-solid fa-phone w-5 text-center mr-1"></i><span>${p.client_phone || 'Не вказано'}</span>`;
+    document.getElementById('pd-client-phone').href = `tel:${p.client_phone || ''}`;
+    document.getElementById('pd-client-address').innerHTML = `<i class="fa-solid fa-map-location-dot w-5 text-center mr-1"></i><span>${p.location_address || 'Не вказано'}</span>`;
+    document.getElementById('pd-advance-payment').textContent = `${p.advance_payment || 0} грн`;
+
+    const editClientBtn = document.getElementById('pd-edit-client-btn');
     if (isPrivileged) {
+        editClientBtn.classList.remove('hidden');
+    } else {
+        editClientBtn.classList.add('hidden');
+    }
+    
+    const adminControls = document.getElementById('pd-admin-controls');
+    if (isPrivileged && adminControls) {
         adminControls.classList.remove('hidden');
         document.getElementById('pd-sales-input').value = p.sales_value || 0;
         document.getElementById('pd-modules-input').value = p.modules_count || '';
         document.getElementById('pd-extra-ws-input').value = p.extra_work_workshop || '';
         document.getElementById('pd-extra-site-input').value = p.extra_work_site || '';
-    } else {
+    } else if (adminControls) {
         adminControls.classList.add('hidden');
     }
     
@@ -357,7 +369,8 @@ function renderProjectDetails(p) {
     } else {
         p.work_logs.forEach(l => {
             const canEdit = state.currentUser && (state.currentUser.id === l.user_id || isPrivileged);
-            const editBtn = canEdit ? `<button onclick="editWorkLog(${l.id}, '${l.work_type}', ${l.quantity}, ${l.modules_done || 0})" class="text-slate-400 hover:text-indigo-600"><i class="fa-solid fa-pen"></i></button>` : '';
+            const safeWorkType = l.work_type.replace(/'/g, "\\'");
+            const editBtn = canEdit ? `<button onclick="editWorkLog(${l.id}, '${safeWorkType}', ${l.quantity}, ${l.modules_done || 0})" class="text-slate-400 hover:text-indigo-600"><i class="fa-solid fa-pen"></i></button>` : '';
             
             wlContainer.innerHTML += `
             <div class="border-b border-slate-50 pb-2 mb-2 last:border-0 group">
@@ -380,24 +393,90 @@ function renderProjectDetails(p) {
     }
 
     const expContainer = document.getElementById('pd-expenselogs');
-    expContainer.innerHTML = '';
-    if (p.expenses.length === 0) {
-        expContainer.innerHTML = '<p class="text-sm text-slate-400">Ще немає витрат</p>';
-    } else {
-        p.expenses.forEach(e => {
-            expContainer.innerHTML += `
-            <div class="border-b border-slate-50 pb-2 mb-2 last:border-0">
-                <div class="flex justify-between items-start">
-                    <div>
-                        <p class="text-sm font-semibold">${e.expense_type}</p>
-                        <p class="text-xs text-slate-500">${e.user_name} • ${e.description || ''}</p>
+    if(expContainer) {
+        expContainer.innerHTML = '';
+        if (p.expenses.length === 0) {
+            expContainer.innerHTML = '<p class="text-sm text-slate-400">Ще немає витрат</p>';
+        } else {
+            p.expenses.forEach(e => {
+                expContainer.innerHTML += `
+                <div class="border-b border-slate-50 pb-2 mb-2 last:border-0">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-sm font-semibold">${e.expense_type}</p>
+                            <p class="text-xs text-slate-500">${e.user_name} • ${e.description || ''}</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-sm font-bold text-rose-600">${e.amount} грн</p>
+                        </div>
                     </div>
-                    <div class="text-right">
-                        <p class="text-sm font-bold text-rose-600">${e.amount} грн</p>
+                </div>`;
+            });
+        }
+    }
+    
+    // Modules List Rendering
+    const modContainer = document.getElementById('pd-modules-list');
+    if(modContainer) {
+        modContainer.innerHTML = '';
+        if(!p.modules || p.modules.length === 0) {
+            modContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-4">Ще немає модулів</p>';
+        } else {
+            p.modules.forEach(m => {
+                let actionBtn = '';
+                if(m.status === 'В черзі') {
+                    actionBtn = `<button onclick="takeModule(${m.id})" class="mt-2 text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-2 rounded-lg w-full">Взяти в роботу</button>`;
+                } else if (m.status === 'В роботі') {
+                    if(state.currentUser && m.assignee_id === state.currentUser.id) {
+                        actionBtn = `<button onclick="completeModule(${m.id})" class="mt-2 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 px-3 py-2 rounded-lg w-full transition">Позначити як Зібрано</button>`;
+                    } else {
+                        actionBtn = `<div class="mt-2 text-xs font-medium text-amber-600 bg-amber-50 px-3 py-2 rounded-lg w-full text-center">Робить: ${m.assignee_name}</div>`;
+                    }
+                } else if (m.status === 'Зібрано') {
+                    actionBtn = `<div class="mt-2 text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg w-full text-center flex items-center justify-center gap-1"><i class="fa-solid fa-check"></i> Зібрано (${m.assignee_name})</div>`;
+                }
+                
+                modContainer.innerHTML += `
+                <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm relative">
+                    <div class="flex justify-between items-start mb-1">
+                        <h4 class="font-bold text-slate-800">${m.name}</h4>
+                        <span class="text-indigo-600 font-bold">${m.salary_calculated > 0 ? m.salary_calculated + ' грн' : '0 грн'}</span>
                     </div>
-                </div>
-            </div>`;
-        });
+                    <div class="text-xs text-slate-500 mb-2 flex gap-3">
+                        <span><i class="fa-solid fa-ruler-combined"></i> ${m.width}x${m.height}x${m.depth}</span>
+                        <span>Стиків: ${m.joints_count}</span>
+                    </div>
+                    ${actionBtn}
+                </div>`;
+            });
+        }
+    }
+    
+    // Invoices List Rendering
+    const invContainer = document.getElementById('pd-invoices-list');
+    if(invContainer) {
+        invContainer.innerHTML = '';
+        if(!p.invoices || p.invoices.length === 0) {
+            invContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-4">Немає рахунків</p>';
+        } else {
+            p.invoices.forEach(inv => {
+                let statusBadge = inv.is_paid 
+                    ? `<span class="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-xs font-bold">Оплачено</span>`
+                    : `<button onclick="payInvoice(${inv.id})" class="bg-amber-100 text-amber-700 hover:bg-emerald-500 hover:text-white px-2 py-1 rounded text-xs font-bold transition">Не оплачено (Оплатити)</button>`;
+                    
+                invContainer.innerHTML += `
+                <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col gap-2">
+                    <div class="flex justify-between">
+                        <span class="font-bold text-slate-800"># ${inv.invoice_number}</span>
+                        <span class="font-bold text-rose-600">${inv.amount_due} грн</span>
+                    </div>
+                    <div class="text-xs text-slate-500 flex justify-between">
+                        <span>${inv.category} • ${inv.branch}</span>
+                        ${statusBadge}
+                    </div>
+                </div>`;
+            });
+        }
     }
     
     const filesContainer = document.getElementById('pd-files');
@@ -611,6 +690,12 @@ function navigate(pageId) {
     if(pageId === 'reports') loadReports();
 }
 
+function handleDynamicBack() {
+    state.currentTabCategory = null;
+    openTab('main');
+    navigate('projects');
+}
+
 function openModal(id) {
     document.getElementById(id).classList.remove('hidden');
 }
@@ -623,9 +708,183 @@ function renderAuthUsers() {
     list.innerHTML = '';
     state.users.forEach(u => {
         const btn = document.createElement('button');
-        btn.className = "w-full text-left px-4 py-3 mb-2 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl font-medium transition flex justify-between";
-        btn.innerHTML = `<span>${u.name}</span> <span class="text-xs px-2 py-1 bg-slate-200 rounded-md text-slate-600">${u.has_password ? '🔒' : '⚠️'} ${u.role}</span>`;
+        btn.className = "w-full text-left px-4 py-3 mb-2 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl font-medium transition flex justify-between items-center";
+        let badge = '';
+        if (u.role === 'Підрядник' || u.role === 'Contractor') {
+            badge = `<span class="text-xs px-2 py-1 bg-slate-200 rounded-md text-slate-600">${u.has_password ? '🔒' : '⚠️'} ${u.role}</span>`;
+        } else {
+            badge = `<span class="text-xs text-slate-400">${u.has_password ? '🔒' : '⚠️'}</span>`;
+        }
+        btn.innerHTML = `<span>${u.name}</span> ${badge}`;
         btn.onclick = () => selectUserForAuth(u);
         list.appendChild(btn);
     });
+}
+
+
+// --- Client Edit Logic ---
+function openClientEditModal() {
+    if(!state.currentProject) return;
+    document.getElementById('ce-name').value = state.currentProject.client_name || '';
+    document.getElementById('ce-phone').value = state.currentProject.client_phone || '';
+    document.getElementById('ce-address').value = state.currentProject.location_address || '';
+    document.getElementById('ce-advance').value = state.currentProject.advance_payment || '';
+    openModal('client-edit-modal');
+}
+
+async function saveClientEdit() {
+    if(!state.currentProject) return;
+    
+    const data = {
+        user_id: state.currentUser.id,
+        client_name: document.getElementById('ce-name').value,
+        client_phone: document.getElementById('ce-phone').value,
+        location_address: document.getElementById('ce-address').value,
+        advance_payment: parseFloat(document.getElementById('ce-advance').value) || 0
+    };
+    
+    await fetch(`${API_URL}/projects/${state.currentProject.id}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+    
+    closeModal('client-edit-modal');
+    openProject(state.currentProject.id);
+}
+
+// --- Templates Fetch ---
+let moduleTemplates = [];
+async function fetchTemplates() {
+    try {
+        const res = await fetch(`${API_URL}/modules/templates`);
+        moduleTemplates = await res.json();
+        
+        const sel = document.getElementById('mod-template');
+        sel.innerHTML = '<option value="">-- Оберіть шаблон --</option>';
+        moduleTemplates.forEach(t => {
+            sel.innerHTML += `<option value="${t.id}">${t.name}</option>`;
+        });
+    } catch(e) {}
+}
+
+function applyModuleTemplate() {
+    const tId = document.getElementById('mod-template').value;
+    if(!tId) return;
+    const tmpl = moduleTemplates.find(x => x.id == tId);
+    if(tmpl) {
+        document.getElementById('mod-name').value = tmpl.name;
+    }
+}
+
+async function saveModule() {
+    if(!state.currentProject || !state.currentUser) return;
+    const tId = document.getElementById('mod-template').value;
+    const name = document.getElementById('mod-name').value;
+    
+    // Calculate salary based on template if selected
+    let salary = 0;
+    if(tId) {
+        const tmpl = moduleTemplates.find(x => x.id == tId);
+        const joints = parseInt(document.getElementById('mod-joints').value) || 0;
+        if(tmpl) {
+            salary = tmpl.base_rate + (joints * tmpl.joints_rate);
+        }
+    }
+    
+    const data = {
+        name: name,
+        type_id: tId,
+        width: parseFloat(document.getElementById('mod-width').value) || 0,
+        height: parseFloat(document.getElementById('mod-height').value) || 0,
+        depth: parseFloat(document.getElementById('mod-depth').value) || 0,
+        joints_count: parseInt(document.getElementById('mod-joints').value) || 0,
+        assignee_id: null,
+        salary_calculated: salary
+    };
+    
+    await fetch(`${API_URL}/projects/${state.currentProject.id}/modules`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+    
+    closeModal('add-module-modal');
+    // reset form
+    document.getElementById('mod-name').value = '';
+    document.getElementById('mod-template').value = '';
+    document.getElementById('mod-width').value = '';
+    document.getElementById('mod-height').value = '';
+    document.getElementById('mod-depth').value = '';
+    document.getElementById('mod-joints').value = '';
+    
+    openProject(state.currentProject.id);
+}
+
+async function takeModule(moduleId) {
+    if(!state.currentUser) return;
+    if(!confirm("Взяти цей модуль в роботу?")) return;
+    
+    await fetch(`${API_URL}/modules/${moduleId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ assignee_id: state.currentUser.id, status: 'В роботі' })
+    });
+    openProject(state.currentProject.id);
+}
+
+async function completeModule(moduleId) {
+    if(!state.currentUser) return;
+    if(!confirm("Позначити модуль як зібраний?")) return;
+    
+    await fetch(`${API_URL}/modules/${moduleId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ status: 'Зібрано' })
+    });
+    openProject(state.currentProject.id);
+}
+
+// --- Invoice Logic ---
+async function saveInvoice() {
+    if(!state.currentProject || !state.currentUser) return;
+    const data = {
+        invoice_number: document.getElementById('inv-number').value,
+        category: document.getElementById('inv-category').value,
+        branch: document.getElementById('inv-branch').value,
+        amount_due: parseFloat(document.getElementById('inv-amount').value) || 0,
+        assignee_id: state.currentUser.id
+    };
+    
+    await fetch(`${API_URL}/projects/${state.currentProject.id}/invoices`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+    
+    closeModal('add-invoice-modal');
+    document.getElementById('inv-number').value = '';
+    document.getElementById('inv-branch').value = '';
+    document.getElementById('inv-amount').value = '';
+    
+    openProject(state.currentProject.id);
+}
+
+async function payInvoice(invoiceId) {
+    if(!state.currentUser) return;
+    if(!confirm("Позначити рахунок як оплачений?")) return;
+    
+    await fetch(`${API_URL}/invoices/${invoiceId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ status: 'Оплачено', is_paid: true })
+    });
+    openProject(state.currentProject.id);
+}
+
+// Add fetchTemplates to init
+const oldInit = init;
+init = async function() {
+    await fetchTemplates();
+    await oldInit();
 }
