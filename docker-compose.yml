@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: viyar_app
+    restart: unless-stopped
+    ports:
+      - "80:8000"
+      - "8000:8000"
+    volumes:
+      # Persistent storage for SQLite database and uploaded files
+      - ./data:/app/data
+    environment:
+      - DATA_DIR=/app/data
+      - PYTHONUNBUFFERED=1

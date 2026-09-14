@@ -22,8 +22,14 @@
             <i class="fa-solid fa-layer-group"></i> Дошка
         </h1>
         <div class="flex items-center gap-3">
+            <button id="nav-schedule-btn" class="text-sm font-medium text-slate-500 hover:text-indigo-600 flex items-center gap-1.5" onclick="navigate('schedule')">
+                <i class="fa-solid fa-calendar-days"></i> <span>Графік</span>
+            </button>
             <button id="nav-reports-btn" class="hidden text-sm font-medium text-slate-500 hover:text-indigo-600" onclick="navigate('reports')">
                 <i class="fa-solid fa-chart-pie mr-1"></i> Звіти
+            </button>
+            <button id="nav-cabinet-btn" class="hidden text-sm font-medium text-slate-500 hover:text-indigo-600" onclick="openCabinet()">
+                <i class="fa-solid fa-address-card mr-1"></i> Кабінет
             </button>
             <div id="current-user-display" class="text-sm font-medium text-slate-600 hidden"></div>
             <button id="auth-btn" class="text-slate-500 hover:text-indigo-600 transition">
@@ -35,7 +41,7 @@
     <main class="flex-1 overflow-y-auto p-4 pb-20 relative">
         
         <!-- Dashboard -->
-        <section id="page-projects" class="h-full flex flex-col">
+        <section id="page-projects" class="h-full flex flex-col relative">
             <div class="text-center text-slate-400 mt-10" id="projects-loading">
                 <i class="fa-solid fa-circle-notch fa-spin text-3xl"></i>
                 <p class="mt-2">Завантаження об'єктів...</p>
@@ -44,6 +50,11 @@
             <div id="projects-container" class="flex gap-6 overflow-x-auto pb-4 h-full items-start snap-x snap-mandatory">
                 <!-- Columns will be injected here -->
             </div>
+            
+            <!-- FAB Add Project -->
+            <button id="fab-add-project" class="hidden absolute bottom-6 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-lg hover:bg-indigo-700 hover:scale-105 transition transform flex items-center justify-center text-2xl z-40" onclick="openModal('project-modal')">
+                <i class="fa-solid fa-plus"></i>
+            </button>
         </section>
         
         <!-- Reports Page -->
@@ -55,10 +66,80 @@
             <div id="reports-content" class="space-y-4"></div>
         </section>
 
+        <!-- Schedule / Calendar Page -->
+        <section id="page-schedule" class="hidden-page space-y-4">
+            <!-- Header bar with filter and add button -->
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                <div>
+                    <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-calendar-days text-indigo-600"></i> Графік монтажів та робіт
+                    </h2>
+                    <p class="text-xs text-slate-400 mt-0.5">Планування виїздів, зборок та замірів</p>
+                </div>
+                
+                <div class="flex items-center gap-2 flex-wrap">
+                    <div class="inline-flex bg-slate-100 p-1 rounded-xl text-xs font-semibold" id="schedule-type-filters">
+                        <button onclick="setScheduleFilter('Всі')" class="sched-filter-btn px-3 py-1.5 rounded-lg transition bg-white text-indigo-600 shadow-xs" data-type="Всі">Всі</button>
+                        <button onclick="setScheduleFilter('Монтаж')" class="sched-filter-btn px-3 py-1.5 rounded-lg transition text-slate-600 hover:text-indigo-600" data-type="Монтаж">🚚 Монтаж</button>
+                        <button onclick="setScheduleFilter('Збірка')" class="sched-filter-btn px-3 py-1.5 rounded-lg transition text-slate-600 hover:text-indigo-600" data-type="Збірка">🛠️ Збірка</button>
+                        <button onclick="setScheduleFilter('Замір')" class="sched-filter-btn px-3 py-1.5 rounded-lg transition text-slate-600 hover:text-indigo-600" data-type="Замір">📐 Замір</button>
+                    </div>
+
+                    <button onclick="openScheduleModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-sm flex items-center gap-1.5 transition">
+                        <i class="fa-solid fa-plus"></i> Запланувати
+                    </button>
+                </div>
+            </div>
+
+            <!-- Calendar Section -->
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+                <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+                    <div class="flex items-center gap-2">
+                        <button onclick="changeCalendarMonth(-1)" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition">
+                            <i class="fa-solid fa-chevron-left text-xs"></i>
+                        </button>
+                        <h3 id="cal-month-title" class="text-base sm:text-lg font-bold text-slate-800 min-w-[140px] text-center">Вересень 2026</h3>
+                        <button onclick="changeCalendarMonth(1)" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition">
+                            <i class="fa-solid fa-chevron-right text-xs"></i>
+                        </button>
+                    </div>
+                    
+                    <button onclick="goToTodayCalendar()" class="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition">
+                        Сьогодні
+                    </button>
+                </div>
+
+                <!-- Days of week -->
+                <div class="grid grid-cols-7 gap-1 text-center font-bold text-xs text-slate-400 mb-2">
+                    <div>Пн</div><div>Вт</div><div>Ср</div><div>Чт</div><div>Пт</div><div class="text-rose-400">Сб</div><div class="text-rose-400">Нд</div>
+                </div>
+
+                <!-- Day grid -->
+                <div id="cal-days-grid" class="grid grid-cols-7 gap-1 sm:gap-1.5"></div>
+            </div>
+
+            <!-- Selected Day Details Breakdown -->
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3" id="cal-day-details-card">
+                <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <div class="flex items-center gap-2">
+                        <span class="w-3 h-3 rounded-full bg-indigo-600"></span>
+                        <h3 id="cal-selected-day-title" class="font-bold text-slate-800 text-base">Завдання на день</h3>
+                    </div>
+                    <button onclick="openScheduleModal(null, calendarState.selectedDate)" class="text-xs font-semibold text-indigo-600 hover:underline flex items-center gap-1">
+                        <i class="fa-solid fa-plus"></i> Додати подію
+                    </button>
+                </div>
+
+                <div id="cal-selected-day-tasks" class="space-y-3">
+                    <p class="text-sm text-slate-400 text-center py-4">Оберіть день у календарі</p>
+                </div>
+            </div>
+        </section>
+
         <!-- Project Details (Main Tiles) -->
         <section id="page-project-details" class="hidden-page space-y-6">
             <div class="flex items-center justify-between mb-2">
-                <button onclick="handleDynamicBack()" class="text-indigo-600 text-sm font-medium flex items-center gap-1">
+                <button id="pd-top-back-btn" onclick="navigate('projects')" class="text-indigo-600 text-sm font-medium flex items-center gap-1">
                     <i class="fa-solid fa-arrow-left"></i> Назад
                 </button>
             </div>
@@ -75,6 +156,11 @@
                     <a id="pd-client-address" href="#" target="_blank" class="hover:text-white transition"><i class="fa-solid fa-map-location-dot w-5 text-center mr-1"></i><span>-</span></a>
                 </div>
 
+                <div id="pd-description-box" class="mt-3 p-3 bg-indigo-500/40 rounded-xl border border-indigo-400/40 text-xs text-indigo-50 hidden">
+                    <div class="font-semibold text-white mb-0.5"><i class="fa-solid fa-file-lines mr-1"></i> Опис замовлення / примітки:</div>
+                    <div id="pd-description-text" class="whitespace-pre-line text-indigo-100"></div>
+                </div>
+
                 <div class="flex items-center gap-2 mt-4">
                     <select id="pd-status-select" onchange="updateProjectStatus()" class="bg-indigo-500/50 border border-indigo-400/50 rounded-lg px-2 py-1 text-xs font-medium text-white focus:outline-none" disabled>
                         <option value="На погодженні">На погодженні</option>
@@ -85,9 +171,15 @@
                     </select>
                 </div>
                 
-                <div class="mt-4 text-sm font-bold bg-indigo-700/50 rounded-lg p-3 flex justify-between items-center">
-                    <span>Баланс авансу:</span>
-                    <span id="pd-advance-payment" class="text-emerald-300">0 грн</span>
+                <div class="mt-4 text-sm font-bold bg-indigo-700/50 rounded-lg p-3 flex flex-col gap-1">
+                    <div class="flex justify-between items-center">
+                        <span>Баланс авансу:</span>
+                        <span id="pd-advance-payment" class="text-emerald-300">0 грн</span>
+                    </div>
+                    <div id="pd-remaining-box" class="flex justify-between items-center text-xs text-indigo-200 font-normal">
+                        <span>Залишок до сплати:</span>
+                        <span id="pd-remaining-payment" class="font-bold text-amber-300">0 грн</span>
+                    </div>
                 </div>
             </div>
 
@@ -118,7 +210,7 @@
         
         <!-- NEW TAB: Modules -->
         <section id="tab-modules" class="hidden-page space-y-5">
-            <button onclick="handleDynamicBack()" class="text-indigo-600 text-sm font-medium flex items-center gap-1 mb-2">
+            <button onclick="openTab('main')" class="text-indigo-600 text-sm font-medium flex items-center gap-1 mb-2">
                 <i class="fa-solid fa-arrow-left"></i> Назад
             </button>
             <h3 class="font-bold text-lg text-slate-800">Модулі</h3>
@@ -128,7 +220,7 @@
 
         <!-- NEW TAB: Invoices -->
         <section id="tab-invoices" class="hidden-page space-y-5">
-            <button onclick="handleDynamicBack()" class="text-indigo-600 text-sm font-medium flex items-center gap-1 mb-2">
+            <button onclick="openTab('main')" class="text-indigo-600 text-sm font-medium flex items-center gap-1 mb-2">
                 <i class="fa-solid fa-arrow-left"></i> Назад
             </button>
             <h3 class="font-bold text-lg text-slate-800">Рахунки (ВіЯр)</h3>
@@ -138,7 +230,7 @@
 
         <!-- NEW TAB: Media -->
         <section id="tab-media" class="hidden-page space-y-5">
-            <button onclick="handleDynamicBack()" class="text-indigo-600 text-sm font-medium flex items-center gap-1 mb-2">
+            <button onclick="openTab('main')" class="text-indigo-600 text-sm font-medium flex items-center gap-1 mb-2">
                 <i class="fa-solid fa-arrow-left"></i> Назад
             </button>
             <h3 class="font-bold text-lg text-slate-800">Фото / Чеки</h3>
@@ -154,7 +246,7 @@
 
         <!-- Tab: Info / Orders -->
         <section id="tab-info" class="hidden-page space-y-5">
-            <button onclick="handleDynamicBack()" class="text-indigo-600 text-sm font-medium flex items-center gap-1 mb-2">
+            <button onclick="openTab('main')" class="text-indigo-600 text-sm font-medium flex items-center gap-1 mb-2">
                 <i class="fa-solid fa-arrow-left"></i> Назад
             </button>
             
@@ -162,6 +254,10 @@
                 <div class="flex justify-between items-center mb-4">
                     <span class="text-sm text-slate-500">Продажна вартість</span>
                     <span id="pd-sales" class="font-bold text-lg text-slate-800">0 грн</span>
+                </div>
+                <div class="flex justify-between items-center mb-4">
+                    <span class="text-sm text-slate-500">Загальна кількість модулів</span>
+                    <span id="pd-modules-display" class="font-bold text-lg text-slate-800">0 шт</span>
                 </div>
                 
                 <!-- Admin Only: Project Settings -->
@@ -225,7 +321,7 @@
 
         <!-- Tab: Checklist -->
         <section id="tab-checklist" class="hidden-page space-y-5">
-            <button onclick="handleDynamicBack()" class="text-indigo-600 text-sm font-medium flex items-center gap-1 mb-2">
+            <button onclick="openTab('main')" class="text-indigo-600 text-sm font-medium flex items-center gap-1 mb-2">
                 <i class="fa-solid fa-arrow-left"></i> Назад
             </button>
             
@@ -253,14 +349,39 @@
     </div>
 
     <!-- Client Edit Modal -->
-    <div id="client-edit-modal" class="fixed inset-0 bg-slate-900/50 hidden items-center justify-center p-4 z-50">
-        <div class="bg-white rounded-3xl w-full max-w-md p-6 relative">
+    <div id="client-edit-modal" class="fixed inset-0 bg-slate-900/50 hidden items-center justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-white rounded-3xl w-full max-w-md p-6 relative my-auto">
             <button onclick="closeModal('client-edit-modal')" class="absolute right-4 top-4 text-slate-400 hover:text-slate-600 text-xl"><i class="fa-solid fa-xmark"></i></button>
-            <h3 class="text-xl font-bold mb-4 text-slate-800">Редагувати клієнта</h3>
+            <h3 class="text-xl font-bold mb-4 text-slate-800">Редагувати клієнта та замовлення</h3>
             <input type="text" id="ce-name" placeholder="Ім'я клієнта" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
             <input type="text" id="ce-phone" placeholder="Телефон" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
-            <input type="text" id="ce-address" placeholder="Адреса" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
-            <input type="number" id="ce-advance" placeholder="Аванс (грн)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 focus:outline-none focus:border-indigo-400">
+            <input type="text" id="ce-address" placeholder="Адреса об'єкту" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
+            
+            <div class="mb-3">
+                <label class="block text-xs font-medium text-slate-500 mb-1">Опис замовлення / примітки</label>
+                <textarea id="ce-description" rows="3" placeholder="Матеріали, колір, фурнітура, особливості монтажу..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-400"></textarea>
+            </div>
+            
+            <div class="mb-4 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                <label class="block text-xs font-bold text-slate-600 mb-2">Форма авансу / оплати:</label>
+                <div class="grid grid-cols-2 gap-2 mb-2">
+                    <button type="button" id="pay-type-amount-btn" onclick="setPaymentType('amount')" class="py-2 text-xs font-bold rounded-xl border border-indigo-600 bg-indigo-600 text-white transition">Сума (грн)</button>
+                    <button type="button" id="pay-type-percent-btn" onclick="setPaymentType('percent')" class="py-2 text-xs font-bold rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 transition">Відсоток (%)</button>
+                </div>
+                
+                <div id="pay-amount-block">
+                    <input type="number" id="ce-advance" oninput="handleAdvanceAmountInput()" placeholder="Аванс (грн)" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-400">
+                    <p id="ce-advance-hint" class="text-xs text-slate-400 mt-1"></p>
+                </div>
+                <div id="pay-percent-block" class="hidden">
+                    <div class="flex items-center gap-2">
+                        <input type="number" id="ce-percent" oninput="handleAdvancePercentInput()" placeholder="Наприклад 70" min="0" max="100" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-400">
+                        <span class="font-bold text-slate-500">%</span>
+                    </div>
+                    <p id="ce-percent-hint" class="text-xs text-indigo-600 font-medium mt-1"></p>
+                </div>
+            </div>
+
             <button onclick="saveClientEdit()" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition">Зберегти</button>
         </div>
     </div>
@@ -283,7 +404,12 @@
                 <input type="number" id="mod-depth" placeholder="Глиб. (мм)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 focus:outline-none focus:border-indigo-400">
             </div>
             
-            <input type="number" id="mod-joints" placeholder="Кількість стиків (шт)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 focus:outline-none focus:border-indigo-400">
+            <input type="number" id="mod-joints" placeholder="Кількість стиків (шт)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
+            
+            <div class="mb-4">
+                <label class="block text-xs font-medium text-slate-500 mb-1">Креслення модуля (PDF / фото)</label>
+                <input type="file" id="mod-file" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-indigo-400">
+            </div>
             
             <button onclick="saveModule()" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition">Додати</button>
         </div>
@@ -301,8 +427,57 @@
                 <option value="Фасади">Фасади</option>
             </select>
             <input type="text" id="inv-branch" placeholder="Філія (напр. В.Гавела)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
-            <input type="number" id="inv-amount" placeholder="Сума (грн)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 focus:outline-none focus:border-indigo-400">
+            <input type="number" id="inv-amount" placeholder="Сума (грн)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
+            <div class="mb-4">
+                <label class="block text-xs font-medium text-slate-500 mb-1">Скан або PDF рахунку (опціонально)</label>
+                <input type="file" id="inv-file" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-indigo-400">
+            </div>
             <button onclick="saveInvoice()" class="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition">Зберегти</button>
+        </div>
+    </div>
+
+    <!-- Edit Module Modal -->
+    <div id="edit-module-modal" class="fixed inset-0 bg-slate-900/50 hidden items-center justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-white rounded-3xl w-full max-w-md p-6 relative my-auto">
+            <button onclick="closeModal('edit-module-modal')" class="absolute right-4 top-4 text-slate-400 hover:text-slate-600 text-xl"><i class="fa-solid fa-xmark"></i></button>
+            <h3 class="text-xl font-bold mb-4 text-slate-800">Редагувати модуль</h3>
+            <input type="hidden" id="edit-mod-id">
+            
+            <input type="text" id="edit-mod-name" placeholder="Назва (напр. Кутова тумба)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
+            
+            <div class="grid grid-cols-3 gap-2 mb-3">
+                <input type="number" id="edit-mod-width" placeholder="Шир. (мм)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 focus:outline-none focus:border-indigo-400">
+                <input type="number" id="edit-mod-height" placeholder="Вис. (мм)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 focus:outline-none focus:border-indigo-400">
+                <input type="number" id="edit-mod-depth" placeholder="Глиб. (мм)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 focus:outline-none focus:border-indigo-400">
+            </div>
+            
+            <input type="number" id="edit-mod-joints" placeholder="Кількість стиків (шт)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
+            
+            <div class="mb-4">
+                <label class="block text-xs font-medium text-slate-500 mb-1">Креслення модуля (PDF / фото)</label>
+                <div id="edit-mod-file-preview" class="mb-2 text-xs text-indigo-600 hidden"></div>
+                <input type="file" id="edit-mod-file" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-indigo-400">
+            </div>
+            
+            <button onclick="submitEditModule()" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition">Зберегти зміни</button>
+        </div>
+    </div>
+
+    <!-- Edit Invoice Modal -->
+    <div id="edit-invoice-modal" class="fixed inset-0 bg-slate-900/50 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-3xl w-full max-w-md p-6 relative">
+            <button onclick="closeModal('edit-invoice-modal')" class="absolute right-4 top-4 text-slate-400 hover:text-slate-600 text-xl"><i class="fa-solid fa-xmark"></i></button>
+            <h3 class="text-xl font-bold mb-4 text-slate-800">Редагувати рахунок ВіЯр</h3>
+            <input type="hidden" id="edit-inv-id">
+            <input type="text" id="edit-inv-number" placeholder="Номер рахунку" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
+            <select id="edit-inv-category" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
+                <option value="Плитні матеріали">Плитні матеріали</option>
+                <option value="Фурнітура">Фурнітура</option>
+                <option value="Фасади">Фасади</option>
+            </select>
+            <input type="text" id="edit-inv-branch" placeholder="Філія (напр. В.Гавела)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
+            <input type="number" id="edit-inv-amount" placeholder="Сума (грн)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400">
+            <button onclick="submitEditInvoice()" class="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition">Зберегти зміни</button>
         </div>
     </div>
 
@@ -378,8 +553,9 @@
         <div class="bg-white w-full max-w-sm rounded-3xl p-6">
             <h3 class="font-bold text-lg mb-4">Додати позицію</h3>
             <p class="text-xs text-slate-500 mb-2">Оберіть з довідника або впишіть свою:</p>
-            <input type="text" id="item-search" list="item-datalist" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 text-sm" placeholder="Назва позиції" autocomplete="off">
+            <input type="text" id="item-search" list="item-datalist" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 text-sm" placeholder="Назва позиції" autocomplete="off">
             <datalist id="item-datalist"></datalist>
+            <input type="number" id="item-qty" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 text-sm" placeholder="Кількість (шт)" autocomplete="off">
             
             <div class="flex gap-2">
                 <button onclick="closeModal('add-item-modal')" class="flex-1 py-2 bg-slate-100 rounded-xl text-sm font-medium">Скасувати</button>
@@ -412,6 +588,158 @@
         </div>
     </div>
 
-    <script src="app.js?v=4"></script>
+    <!-- Cabinet Modal -->
+    <div id="cabinet-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center">
+        <div class="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6 max-h-screen overflow-y-auto relative">
+            <button onclick="closeModal('cabinet-modal')" class="absolute right-4 top-4 text-slate-400 hover:text-slate-600 text-xl"><i class="fa-solid fa-xmark"></i></button>
+            <h3 class="text-xl font-bold mb-4 text-slate-800">Мій Кабінет</h3>
+            
+            <div id="cabinet-stats" class="bg-indigo-50 rounded-2xl p-4 mb-5 border border-indigo-100">
+                <p class="text-xs text-indigo-400 font-bold uppercase mb-1">Статистика</p>
+                <div class="grid grid-cols-2 gap-3 mt-2">
+                    <div>
+                        <p class="text-sm text-slate-500">Заробіток</p>
+                        <p class="text-lg font-bold text-indigo-700" id="cab-earnings">0 грн</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-slate-500">Витрати</p>
+                        <p class="text-lg font-bold text-rose-600" id="cab-expenses">0 грн</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mb-5">
+                <p class="text-xs text-indigo-400 font-bold uppercase mb-2">Зміна пароля</p>
+                <input type="password" id="cab-old-pw" placeholder="Старий пароль" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-2 text-sm focus:outline-none focus:border-indigo-400">
+                <input type="password" id="cab-new-pw" placeholder="Новий пароль" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 text-sm focus:outline-none focus:border-indigo-400">
+                <button onclick="changePassword()" class="w-full bg-indigo-100 text-indigo-700 py-2 rounded-xl text-sm font-bold hover:bg-indigo-200 transition">Змінити пароль</button>
+            </div>
+
+            <div>
+                <p class="text-xs text-indigo-400 font-bold uppercase mb-2">Графік планування робіт (Мої задачі)</p>
+                <div id="cab-tasks" class="space-y-2 max-h-48 overflow-y-auto">
+                    <!-- Задачі генеруватимуться в JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Module Comments Modal -->
+    <div id="module-comments-modal" class="fixed inset-0 bg-slate-900/50 hidden items-center justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-white rounded-3xl w-full max-w-lg p-6 relative my-auto flex flex-col max-h-[85vh]">
+            <button onclick="closeModal('module-comments-modal')" class="absolute right-4 top-4 text-slate-400 hover:text-slate-600 text-xl"><i class="fa-solid fa-xmark"></i></button>
+            <input type="hidden" id="mc-modal-module-id">
+            
+            <div class="mb-3 pr-8">
+                <span class="text-xs font-bold text-indigo-600 uppercase tracking-wider">Коментарі до модуля</span>
+                <h3 id="mc-module-title" class="text-lg font-bold text-slate-800 truncate">Назва модуля</h3>
+            </div>
+            
+            <!-- Comments List -->
+            <div id="mc-comments-list" class="flex-1 overflow-y-auto space-y-2.5 pr-1 min-h-[160px] max-h-[380px] mb-4 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                <!-- Dynamically rendered -->
+            </div>
+            
+            <!-- Add comment input -->
+            <div class="pt-2 border-t border-slate-100 flex gap-2 items-center">
+                <input type="text" id="mc-new-comment-input" onkeydown="if(event.key==='Enter') submitModuleComment()" placeholder="Напишіть коментар чи замітку..." class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-400">
+                <button onclick="submitModuleComment()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-xl text-sm transition flex items-center gap-1.5 shadow-sm">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schedule Event Modal -->
+    <div id="schedule-modal" class="fixed inset-0 bg-slate-900/50 hidden items-center justify-center p-4 z-50 overflow-y-auto">
+        <div class="bg-white rounded-3xl w-full max-w-lg p-6 relative my-auto">
+            <button onclick="closeModal('schedule-modal')" class="absolute right-4 top-4 text-slate-400 hover:text-slate-600 text-xl"><i class="fa-solid fa-xmark"></i></button>
+            <input type="hidden" id="sch-id">
+            <h3 id="sch-modal-title" class="text-xl font-bold mb-4 text-slate-800">Запланувати подію</h3>
+            
+            <!-- Event Type Selector -->
+            <div class="mb-3">
+                <label class="block text-xs font-medium text-slate-500 mb-1">Тип виїзду / роботи</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <button type="button" onclick="setScheduleModalType('Монтаж')" class="sch-type-select-btn py-2 text-xs font-bold rounded-xl border border-indigo-600 bg-indigo-600 text-white transition" data-val="Монтаж">🚚 Монтаж</button>
+                    <button type="button" onclick="setScheduleModalType('Збірка')" class="sch-type-select-btn py-2 text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition" data-val="Збірка">🛠️ Збірка</button>
+                    <button type="button" onclick="setScheduleModalType('Замір')" class="sch-type-select-btn py-2 text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition" data-val="Замір">📐 Замір</button>
+                </div>
+                <input type="hidden" id="sch-type" value="Монтаж">
+            </div>
+
+            <!-- Project link -->
+            <div class="mb-3">
+                <label class="block text-xs font-medium text-slate-500 mb-1">Прив'язати до об'єкту (опціонально)</label>
+                <select id="sch-project" onchange="handleScheduleProjectChange()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-400">
+                    <option value="">-- Без прив'язки (індивідуальний замір/робота) --</option>
+                </select>
+            </div>
+
+            <div class="mb-3">
+                <label class="block text-xs font-medium text-slate-500 mb-1">Назва події / замовлення</label>
+                <input type="text" id="sch-title" placeholder="напр. Монтаж кухні (Олеся 17)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-400" required>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mb-3">
+                <div>
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Дата</label>
+                    <input type="date" id="sch-date" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-indigo-400" required>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Час</label>
+                    <input type="time" id="sch-time" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-indigo-400">
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="block text-xs font-medium text-slate-500 mb-1">Адреса об'єкту / маршрут</label>
+                <input type="text" id="sch-address" placeholder="вул. Хрещатик 1, кв 12" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-400">
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mb-3">
+                <div>
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Ім'я клієнта</label>
+                    <input type="text" id="sch-client-name" placeholder="Олександр" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-indigo-400">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Телефон</label>
+                    <input type="text" id="sch-client-phone" placeholder="+380..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-indigo-400">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mb-3">
+                <div>
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Відповідальний майстер</label>
+                    <select id="sch-assignee" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+                        <option value="">-- Оберіть майстра --</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Статус</label>
+                    <select id="sch-status" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+                        <option value="Заплановано">Заплановано</option>
+                        <option value="В процесі">В процесі</option>
+                        <option value="Виконано">Виконано</option>
+                        <option value="Перенесено">Перенесено</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <label class="block text-xs font-medium text-slate-500 mb-1">Нотатки, інструмент, особливості</label>
+                <textarea id="sch-notes" rows="2" placeholder="Взяти драбину, перехідники, коментарі клієнта..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-indigo-400"></textarea>
+            </div>
+
+            <div class="flex gap-2">
+                <button type="button" id="sch-delete-btn" onclick="deleteScheduleEvent()" class="hidden py-3 px-4 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl font-bold text-sm transition">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+                <button type="button" onclick="saveScheduleEvent()" class="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition">Зберегти</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=5"></script>
 </body>
 </html>

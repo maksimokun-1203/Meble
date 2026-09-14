@@ -1,7 +1,15 @@
 backend/__pycache__/
-backend/viyar_app.db
-backend/uploads/
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
 .env
+backend/uploads/
 backend/fix.py
 backend/migrate*.py
 frontend/patch_app.py
+*.log
+.vscode/
+.idea/

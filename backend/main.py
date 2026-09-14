@@ -6,6 +6,12 @@ from pydantic import BaseModel
 import os
 import shutil
 import hashlib
+import datetime
+import re
+try:
+    import PyPDF2
+except ImportError:
+    PyPDF2 = None
 from database import get_db
 
 app = FastAPI(title="ViyarApp API")
@@ -18,7 +24,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+DATA_DIR = os.environ.get("DATA_DIR", os.path.dirname(__file__))
+UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "../frontend")
@@ -39,7 +46,7 @@ class ContractorCreate(BaseModel):
     name: str
 
 class ProjectUpdate(BaseModel):
-    user_id: int
+    user_id: Optional[int] = None
     sales_value: Optional[float] = None
     status: Optional[str] = None
     modules_count: Optional[float] = None
@@ -49,6 +56,39 @@ class ProjectUpdate(BaseModel):
     client_phone: Optional[str] = None
     location_address: Optional[str] = None
     advance_payment: Optional[float] = None
+    description: Optional[str] = None
+    payment_type: Optional[str] = None
+    advance_percent: Optional[float] = None
+
+class ModuleCommentCreate(BaseModel):
+    user_id: int
+    text: str
+
+class ScheduleCreate(BaseModel):
+    project_id: Optional[int] = None
+    event_type: str
+    title: str
+    event_date: str
+    event_time: Optional[str] = None
+    address: Optional[str] = None
+    client_name: Optional[str] = None
+    client_phone: Optional[str] = None
+    assignee_id: Optional[int] = None
+    status: Optional[str] = "Заплановано"
+    notes: Optional[str] = None
+
+class ScheduleUpdate(BaseModel):
+    project_id: Optional[int] = None
+    event_type: Optional[str] = None
+    title: Optional[str] = None
+    event_date: Optional[str] = None
+    event_time: Optional[str] = None
+    address: Optional[str] = None
+    client_name: Optional[str] = None
+    client_phone: Optional[str] = None
+    assignee_id: Optional[int] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
 
 class WorkLogCreate(BaseModel):
     project_id: int
@@ -88,10 +128,18 @@ class ModuleCreate(BaseModel):
     joints_count: int
     assignee_id: Optional[int] = None
     salary_calculated: float = 0
+    drawing_path: Optional[str] = None
 
 class ModuleUpdate(BaseModel):
     status: Optional[str] = None
     assignee_id: Optional[int] = None
+    name: Optional[str] = None
+    width: Optional[float] = None
+    height: Optional[float] = None
+    depth: Optional[float] = None
+    joints_count: Optional[int] = None
+    drawing_path: Optional[str] = None
+    hours: Optional[float] = None
 
 class InvoiceCreate(BaseModel):
     invoice_number: str
@@ -99,10 +147,16 @@ class InvoiceCreate(BaseModel):
     branch: str
     assignee_id: Optional[int] = None
     amount_due: float = 0
+    file_path: Optional[str] = None
 
 class InvoiceUpdate(BaseModel):
     status: Optional[str] = None
     is_paid: Optional[bool] = None
+    is_ready: Optional[bool] = None
+    invoice_number: Optional[str] = None
+    category: Optional[str] = None
+    branch: Optional[str] = None
+    amount_due: Optional[float] = None
 
 # Routes
 @app.post("/api/set-password")
@@ -168,6 +222,28 @@ def get_user_stats(user_id: int):
         "projects_count": projects
     }
 
+@app.get("/api/users/{user_id}/tasks")
+def get_user_tasks(user_id: int):
+    conn = get_db()
+    # Get active modules assigned to user
+    modules = conn.execute("""
+        SELECT m.id, m.name, m.status, p.name as project_name, 'Модуль' as task_type, '' as event_date, '' as event_time
+        FROM modules m
+        JOIN projects p ON m.project_id = p.id
+        WHERE m.assignee_id = ? AND m.status = 'В роботі'
+    """, (user_id,)).fetchall()
+    
+    # Get upcoming schedule events assigned to user
+    schedules = conn.execute("""
+        SELECT s.id, s.title as name, s.status, COALESCE(p.name, 'Індивідуально') as project_name, s.event_type as task_type, s.event_date, s.event_time
+        FROM schedules s
+        LEFT JOIN projects p ON s.project_id = p.id
+        WHERE s.assignee_id = ? AND s.status != 'Виконано'
+        ORDER BY s.event_date ASC, s.event_time ASC
+    """, (user_id,)).fetchall()
+    
+    return [dict(m) for m in modules] + [dict(s) for s in schedules]
+
 @app.post("/api/users/contractor")
 def create_contractor(data: ContractorCreate):
     conn = get_db()
@@ -210,8 +286,23 @@ def get_project(project_id: int, user_id: Optional[int] = None):
     items = conn.execute("SELECT * FROM project_items WHERE project_id = ?", (project_id,)).fetchall()
     
     # New tables
-    modules = conn.execute("SELECT m.*, u.name as assignee_name FROM modules m LEFT JOIN users u ON m.assignee_id = u.id WHERE m.project_id = ?", (project_id,)).fetchall()
+    modules = conn.execute("""
+        SELECT m.*, u.name as assignee_name,
+               (SELECT COUNT(*) FROM module_comments WHERE module_id = m.id) as comments_count
+        FROM modules m 
+        LEFT JOIN users u ON m.assignee_id = u.id 
+        WHERE m.project_id = ?
+    """, (project_id,)).fetchall()
+    
     invoices = conn.execute("SELECT i.*, u.name as assignee_name FROM viyar_invoices i LEFT JOIN users u ON i.assignee_id = u.id WHERE i.project_id = ?", (project_id,)).fetchall()
+    
+    schedules = conn.execute("""
+        SELECT s.*, u.name as assignee_name
+        FROM schedules s
+        LEFT JOIN users u ON s.assignee_id = u.id
+        WHERE s.project_id = ?
+        ORDER BY s.event_date ASC, s.event_time ASC
+    """, (project_id,)).fetchall()
     
     # Dynamic Salary Calculation
     pools = {
@@ -249,6 +340,7 @@ def get_project(project_id: int, user_id: Optional[int] = None):
     project_dict["items"] = [dict(i) for i in items]
     project_dict["modules"] = [dict(m) for m in modules]
     project_dict["invoices"] = [dict(i) for i in invoices]
+    project_dict["schedules"] = [dict(s) for s in schedules]
     
     # PRIVACY FILTER
     if user_id:
@@ -293,6 +385,12 @@ def update_project(project_id: int, data: ProjectUpdate):
         conn.execute("UPDATE projects SET location_address = ? WHERE id = ?", (data.location_address, project_id))
     if data.advance_payment is not None:
         conn.execute("UPDATE projects SET advance_payment = ? WHERE id = ?", (data.advance_payment, project_id))
+    if data.description is not None:
+        conn.execute("UPDATE projects SET description = ? WHERE id = ?", (data.description, project_id))
+    if data.payment_type is not None:
+        conn.execute("UPDATE projects SET payment_type = ? WHERE id = ?", (data.payment_type, project_id))
+    if data.advance_percent is not None:
+        conn.execute("UPDATE projects SET advance_percent = ? WHERE id = ?", (data.advance_percent, project_id))
 
     conn.commit()
     return {"status": "success"}
@@ -321,24 +419,63 @@ def update_project_item(project_id: int, item_id: int, data: ProjectItemUpdate):
     conn.commit()
     return {"status": "success"}
 
+@app.delete("/api/projects/{project_id}/items/{item_id}")
+def delete_project_item(project_id: int, item_id: int):
+    conn = get_db()
+    conn.execute("DELETE FROM project_items WHERE id = ?", (item_id,))
+    conn.commit()
+    return {"status": "success"}
+
 @app.post("/api/projects/{project_id}/modules")
 def create_module(project_id: int, data: ModuleCreate):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO modules (project_id, name, type_id, width, height, depth, joints_count, assignee_id, salary_calculated)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (project_id, data.name, data.type_id, data.width, data.height, data.depth, data.joints_count, data.assignee_id, data.salary_calculated))
+        INSERT INTO modules (project_id, name, type_id, width, height, depth, joints_count, assignee_id, salary_calculated, drawing_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (project_id, data.name, data.type_id, data.width, data.height, data.depth, data.joints_count, data.assignee_id, data.salary_calculated, data.drawing_path))
     conn.commit()
     return {"status": "success"}
 
 @app.put("/api/modules/{module_id}")
 def update_module(module_id: int, data: ModuleUpdate):
     conn = get_db()
+    cursor = conn.cursor()
+    old_mod = cursor.execute("SELECT status, project_id, assignee_id FROM modules WHERE id = ?", (module_id,)).fetchone()
+    
     if data.status is not None:
         conn.execute("UPDATE modules SET status = ? WHERE id = ?", (data.status, module_id))
+        
+        # Auto-log if status becomes 'Зібрано'
+        user_id = data.assignee_id or (old_mod["assignee_id"] if old_mod else None)
+        if data.status == "Зібрано" and old_mod and old_mod["status"] != "Зібрано" and user_id:
+            current_date = datetime.date.today().isoformat()
+            log = cursor.execute("SELECT id FROM work_logs WHERE project_id=? AND user_id=? AND work_type=? AND date(date)=?", 
+                                (old_mod["project_id"], user_id, "Збірка в цеху", current_date)).fetchone()
+            
+            h = float(data.hours or 0.0)
+            if log:
+                cursor.execute("UPDATE work_logs SET quantity = COALESCE(quantity, 0) + ?, modules_done = COALESCE(modules_done, 0) + 1 WHERE id=?", (h, log["id"]))
+            else:
+                cursor.execute("""
+                    INSERT INTO work_logs (project_id, user_id, work_type, unit, quantity, amount, modules_done)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (old_mod["project_id"], user_id, "Збірка в цеху", "годин", h, 0, 1))
+
     if data.assignee_id is not None:
         conn.execute("UPDATE modules SET assignee_id = ? WHERE id = ?", (data.assignee_id, module_id))
+    if data.name is not None:
+        conn.execute("UPDATE modules SET name = ? WHERE id = ?", (data.name, module_id))
+    if data.width is not None:
+        conn.execute("UPDATE modules SET width = ? WHERE id = ?", (data.width, module_id))
+    if data.height is not None:
+        conn.execute("UPDATE modules SET height = ? WHERE id = ?", (data.height, module_id))
+    if data.depth is not None:
+        conn.execute("UPDATE modules SET depth = ? WHERE id = ?", (data.depth, module_id))
+    if data.joints_count is not None:
+        conn.execute("UPDATE modules SET joints_count = ? WHERE id = ?", (data.joints_count, module_id))
+    if data.drawing_path is not None:
+        conn.execute("UPDATE modules SET drawing_path = ? WHERE id = ?", (data.drawing_path, module_id))
     conn.commit()
     return {"status": "success"}
 
@@ -346,17 +483,41 @@ def update_module(module_id: int, data: ModuleUpdate):
 def delete_module(module_id: int):
     conn = get_db()
     conn.execute("DELETE FROM modules WHERE id = ?", (module_id,))
+    conn.execute("DELETE FROM module_comments WHERE module_id = ?", (module_id,))
     conn.commit()
     return {"status": "success"}
+
+@app.get("/api/modules/{module_id}/comments")
+def get_module_comments(module_id: int):
+    conn = get_db()
+    comments = conn.execute("""
+        SELECT c.*, u.name as user_name
+        FROM module_comments c
+        JOIN users u ON c.user_id = u.id
+        WHERE c.module_id = ?
+        ORDER BY c.id ASC
+    """, (module_id,)).fetchall()
+    return [dict(c) for c in comments]
+
+@app.post("/api/modules/{module_id}/comments")
+def add_module_comment(module_id: int, data: ModuleCommentCreate):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO module_comments (module_id, user_id, text)
+        VALUES (?, ?, ?)
+    """, (module_id, data.user_id, data.text.strip()))
+    conn.commit()
+    return {"status": "success", "id": cursor.lastrowid}
 
 @app.post("/api/projects/{project_id}/invoices")
 def create_invoice(project_id: int, data: InvoiceCreate):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO viyar_invoices (project_id, invoice_number, category, branch, assignee_id, amount_due)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (project_id, data.invoice_number, data.category, data.branch, data.assignee_id, data.amount_due))
+        INSERT INTO viyar_invoices (project_id, invoice_number, category, branch, assignee_id, amount_due, file_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (project_id, data.invoice_number, data.category, data.branch, data.assignee_id, data.amount_due, data.file_path))
     conn.commit()
     return {"status": "success"}
 
@@ -367,6 +528,16 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate):
         conn.execute("UPDATE viyar_invoices SET status = ? WHERE id = ?", (data.status, invoice_id))
     if data.is_paid is not None:
         conn.execute("UPDATE viyar_invoices SET is_paid = ? WHERE id = ?", (data.is_paid, invoice_id))
+    if data.is_ready is not None:
+        conn.execute("UPDATE viyar_invoices SET is_ready = ? WHERE id = ?", (data.is_ready, invoice_id))
+    if data.invoice_number is not None:
+        conn.execute("UPDATE viyar_invoices SET invoice_number = ? WHERE id = ?", (data.invoice_number, invoice_id))
+    if data.category is not None:
+        conn.execute("UPDATE viyar_invoices SET category = ? WHERE id = ?", (data.category, invoice_id))
+    if data.branch is not None:
+        conn.execute("UPDATE viyar_invoices SET branch = ? WHERE id = ?", (data.branch, invoice_id))
+    if data.amount_due is not None:
+        conn.execute("UPDATE viyar_invoices SET amount_due = ? WHERE id = ?", (data.amount_due, invoice_id))
     conn.commit()
     return {"status": "success"}
 
@@ -440,7 +611,123 @@ def upload_file(project_id: int, file: UploadFile = File(...)):
     cursor.execute("INSERT INTO files (project_id, filename, filepath) VALUES (?, ?, ?)", 
                    (project_id, file.filename, f"/uploads/{file.filename}"))
     conn.commit()
-    return {"status": "success", "filename": file.filename}
+    return {"status": "success", "filename": file.filename, "filepath": f"/uploads/{file.filename}"}
+
+@app.post("/api/parse-viyar-invoice")
+def parse_viyar_invoice(file: UploadFile = File(...)):
+    if not PyPDF2:
+        return {"status": "error", "message": "PyPDF2 is not installed"}
+    
+    filepath = os.path.join(UPLOAD_DIR, file.filename)
+    with open(filepath, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    text = ""
+    try:
+        with open(filepath, "rb") as f:
+            reader = PyPDF2.PdfReader(f)
+            for page in reader.pages:
+                text += page.extract_text() or ""
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+    # Best-effort regex parsing
+    # Number: e.g. "Замовлення покупця № СФ-000123" or "Рахунок-фактура №..."
+    inv_number = ""
+    m_num = re.search(r'(?:Замовлення(?:\s+покупця)?|Рахунок(?:-фактура|\s+на\s+оплату)?|СФ|ЗВ|ЧК).*?№\s*([A-Za-zА-Яа-я0-9\-_/]+)', text, re.IGNORECASE)
+    if not m_num:
+        m_num = re.search(r'№\s*([A-Za-zА-Яа-я0-9\-_/]{3,})', text)
+    if m_num:
+        inv_number = m_num.group(1).strip()
+        
+    # Amount: e.g. "Всього до сплати: 12 345,67 грн"
+    amount = 0.0
+    m_amt = re.search(r'(?:Всього\s+(?:до\s+сплати|на\s+суму)|Разом\s+(?:до\s+сплати|з\s+ПДВ)?|Сума\s+до\s+сплати|До\s+сплати|Разом)\s*[:\-]?\s*([0-9][0-9\s]*[.,][0-9]{2})', text, re.IGNORECASE)
+    if not m_amt:
+        m_amt = re.search(r'(\d+[\s\d]*[.,]\d{2})\s*(?:грн|UAH)', text, re.IGNORECASE)
+    if m_amt:
+        val_str = m_amt.group(1).replace('\xa0', '').replace(' ', '').replace(',', '.')
+        try:
+            amount = float(val_str)
+        except:
+            pass
+
+    # Branch
+    branch = ""
+    if "Гавела" in text or "Лепсе" in text:
+        branch = "В.Гавела"
+    elif "Віскозна" in text:
+        branch = "Віскозна"
+    elif "Новокостянтинівська" in text or "Новокост" in text:
+        branch = "Новокостянтинівська"
+    elif "Дніпровська" in text or "Дніпронабережна" in text:
+        branch = "Дніпровська набережна"
+    elif "Бровар" in text:
+        branch = "Бровари"
+
+    return {
+        "status": "success", 
+        "filename": file.filename,
+        "filepath": f"/uploads/{file.filename}",
+        "invoice_number": inv_number, 
+        "amount": amount, 
+        "branch": branch
+    }
+
+@app.get("/api/schedules")
+def get_schedules(month: Optional[str] = None, event_type: Optional[str] = None, project_id: Optional[int] = None):
+    conn = get_db()
+    query = """
+        SELECT s.*, p.name as project_name, u.name as assignee_name
+        FROM schedules s
+        LEFT JOIN projects p ON s.project_id = p.id
+        LEFT JOIN users u ON s.assignee_id = u.id
+        WHERE 1=1
+    """
+    params = []
+    if month:
+        query += " AND s.event_date LIKE ?"
+        params.append(f"{month}%")
+    if event_type and event_type != "Всі":
+        query += " AND s.event_type = ?"
+        params.append(event_type)
+    if project_id:
+        query += " AND s.project_id = ?"
+        params.append(project_id)
+        
+    query += " ORDER BY s.event_date ASC, s.event_time ASC"
+    rows = conn.execute(query, params).fetchall()
+    return [dict(r) for r in rows]
+
+@app.post("/api/schedules")
+def create_schedule(data: ScheduleCreate):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO schedules (project_id, event_type, title, event_date, event_time, address, client_name, client_phone, assignee_id, status, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (data.project_id, data.event_type, data.title, data.event_date, data.event_time, data.address, data.client_name, data.client_phone, data.assignee_id, data.status or 'Заплановано', data.notes))
+    conn.commit()
+    return {"status": "success", "id": cursor.lastrowid}
+
+@app.put("/api/schedules/{schedule_id}")
+def update_schedule(schedule_id: int, data: ScheduleUpdate):
+    conn = get_db()
+    update_data = {k: v for k, v in data.dict().items() if v is not None}
+    if update_data:
+        fields = [f"{k} = ?" for k in update_data.keys()]
+        values = list(update_data.values())
+        values.append(schedule_id)
+        conn.execute(f"UPDATE schedules SET {', '.join(fields)} WHERE id = ?", values)
+        conn.commit()
+    return {"status": "success"}
+
+@app.delete("/api/schedules/{schedule_id}")
+def delete_schedule(schedule_id: int):
+    conn = get_db()
+    conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
+    conn.commit()
+    return {"status": "success"}
 
 @app.get("/api/reports")
 def get_reports():
