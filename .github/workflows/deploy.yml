@@ -17,6 +17,6 @@ jobs:
           password: ${{ secrets.VPS_PASSWORD }}
           port: 22
           script: |
-            cd ~/Meble
+            cd /root/Meble
             git pull
             docker compose up -d --build
