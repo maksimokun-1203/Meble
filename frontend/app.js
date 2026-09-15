@@ -14,6 +14,10 @@ let state = {
 async function fetchUsers() {
     const res = await fetch(`${API_URL}/users`);
     state.users = await res.json();
+    const dl = document.getElementById('users-list');
+    if (dl) {
+        dl.innerHTML = state.users.map(u => `<option value="${u.name}"></option>`).join('');
+    }
 }
 
 async function fetchProjects() {
@@ -37,9 +41,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     
     await fetchUsers();
     await fetchDictionary();
+    await fetchDictionary();
     await fetchTemplates();
-    renderAuthUsers();
-    
     if (savedUserId) {
         const u = state.users.find(x => x.id == savedUserId);
         if (u) finishLogin(u);
@@ -48,12 +51,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadProjectsDashboard();
     
     document.getElementById('auth-btn').onclick = () => {
-        document.getElementById('auth-password-section').classList.add('hidden');
-        document.getElementById('users-list').classList.remove('hidden');
         openModal('auth-modal');
     };
 
-    document.getElementById('auth-submit').onclick = handlePasswordSubmit;
+    document.getElementById('auth-submit').onclick = handleLoginSubmit;
 
     // Auto-parse Viyar invoice PDF
     const invFileInput = document.getElementById('inv-file');
@@ -90,38 +91,31 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 });
 
-function selectUserForAuth(user) {
-    state.selectedUserForAuth = user;
-    document.getElementById('users-list').classList.add('hidden');
-    document.getElementById('auth-password-section').classList.remove('hidden');
-    
-    const prompt = document.getElementById('auth-prompt');
-    if (user.has_password) {
-        prompt.textContent = `Введіть пароль для ${user.name}:`;
-    } else {
-        prompt.textContent = `Придумайте пароль для ${user.name}:`;
-    }
-    document.getElementById('auth-password').value = '';
-}
-
-async function handlePasswordSubmit() {
+async function handleLoginSubmit() {
+    const login = document.getElementById('auth-login').value.trim();
     const pw = document.getElementById('auth-password').value;
-    if(!pw) return;
+    if(!login || !pw) return;
     
-    const user = state.selectedUserForAuth;
-    const endpoint = user.has_password ? '/login' : '/set-password';
-    
-    const res = await fetch(`${API_URL}${endpoint}`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({user_id: user.id, password: pw})
-    });
-    
-    if (res.ok) {
-        if (!user.has_password) user.has_password = true;
-        finishLogin(user);
-    } else {
-        alert("Помилка: невірний пароль!");
+    try {
+        const res = await fetch(`${API_URL}/login`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username: login, password: pw})
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            finishLogin(data.user);
+        } else if (res.status === 404) {
+            alert("Помилка: користувача з таким логіном не знайдено!");
+        } else if (res.status === 401) {
+            alert("Помилка: невірний пароль!");
+        } else {
+            alert("Помилка: невірний логін або пароль!");
+        }
+    } catch (e) {
+        console.error(e);
+        alert("Помилка сервера");
     }
 }
 
@@ -441,6 +435,36 @@ function renderProjectDetails(p) {
     } else {
         if (remBox) remBox.classList.remove('hidden');
         if (remEl) remEl.textContent = `0 грн`;
+    }
+
+    // Calculate current user balance
+    if (state.currentUser) {
+        const myModules = (p.modules || []).filter(m => m.assignee_id === state.currentUser.id);
+        const myWorkLogs = (p.work_logs || []).filter(w => w.user_id === state.currentUser.id);
+        
+        let myEarned = 0;
+        let myPaid = 0;
+        
+        myModules.forEach(m => {
+            myEarned += m.salary_calculated || 0;
+            if (m.is_paid) myPaid += m.salary_calculated || 0;
+        });
+        
+        myWorkLogs.forEach(w => {
+            myEarned += w.amount || 0;
+            if (w.is_paid) myPaid += w.amount || 0;
+        });
+        
+        const balanceBox = document.getElementById('pd-user-balance-box');
+        if (balanceBox) {
+            if (myEarned > 0) {
+                balanceBox.classList.remove('hidden');
+                document.getElementById('pd-user-earned').textContent = `${myEarned.toFixed(0)} грн`;
+                document.getElementById('pd-user-unpaid').textContent = `${(myEarned - myPaid).toFixed(0)} грн`;
+            } else {
+                balanceBox.classList.add('hidden');
+            }
+        }
     }
 
     const editClientBtn = document.getElementById('pd-edit-client-btn');
@@ -839,12 +863,15 @@ async function uploadFile() {
     }
 }
 
+let currentReportsData = null;
+
 async function loadReports() {
     document.getElementById('reports-loading').classList.remove('hidden');
     document.getElementById('reports-content').innerHTML = '';
     
     const res = await fetch(`${API_URL}/reports`);
     const data = await res.json();
+    currentReportsData = data.user_earnings;
     
     document.getElementById('reports-loading').classList.add('hidden');
     
@@ -864,16 +891,84 @@ async function loadReports() {
         <div class="space-y-3">
     `;
     
-    for (const [user, amount] of Object.entries(data.user_earnings)) {
+    for (const [user, udata] of Object.entries(data.user_earnings)) {
+        const unpaid = udata.total_earned - udata.total_paid;
         html += `
-        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-50 flex justify-between items-center">
-            <span class="font-medium text-slate-700">${user}</span>
-            <span class="font-bold text-indigo-600 text-lg">${amount.toFixed(0)} грн</span>
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 cursor-pointer hover:bg-slate-50 transition" onclick="openUserPayoutsModal('${user}')">
+            <div>
+                <span class="font-bold text-slate-700 block">${user}</span>
+                <div class="flex gap-4 mt-1 text-xs">
+                    <span class="text-slate-500">Заробіток: <b class="text-slate-700">${udata.total_earned.toFixed(0)} грн</b></span>
+                    <span class="text-indigo-500">Виплачено: <b class="text-indigo-600">${udata.total_paid.toFixed(0)} грн</b></span>
+                </div>
+            </div>
+            <div class="flex items-center gap-3 text-right">
+                <div>
+                    <span class="block text-xs text-slate-400 mb-0.5">До виплати</span>
+                    <span class="font-bold text-rose-500 text-lg">${unpaid.toFixed(0)} грн</span>
+                </div>
+                <i class="fa-solid fa-chevron-right text-slate-300 ml-2"></i>
+            </div>
         </div>`;
     }
     
     html += `</div>`;
     document.getElementById('reports-content').innerHTML = html;
+}
+
+function openUserPayoutsModal(userName) {
+    const udata = currentReportsData[userName];
+    if (!udata) return;
+    
+    document.getElementById('payout-user-name').innerText = userName;
+    document.getElementById('payout-total-earned').innerText = udata.total_earned.toFixed(0) + ' грн';
+    
+    const paidInput = document.getElementById('payout-total-paid-input');
+    paidInput.value = udata.total_paid;
+    paidInput.onchange = async (e) => {
+        const newPaid = parseFloat(e.target.value) || 0;
+        try {
+            const res = await fetch(`${API_URL}/users/${udata.id}/update_paid`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount: newPaid })
+            });
+            if (res.ok) {
+                udata.total_paid = newPaid;
+                document.getElementById('payout-total-unpaid').innerText = (udata.total_earned - udata.total_paid).toFixed(0) + ' грн';
+            }
+        } catch (err) { console.error(err); }
+    };
+    
+    document.getElementById('payout-total-unpaid').innerText = (udata.total_earned - udata.total_paid).toFixed(0) + ' грн';
+    
+    let itemsHtml = '';
+    
+    if (udata.items.length === 0) {
+        itemsHtml = '<p class="text-sm text-slate-500 text-center py-4">Немає записів про виплати</p>';
+    } else {
+        udata.items.forEach(item => {
+            const bgClass = 'bg-white';
+            const borderClass = 'border-slate-100';
+            
+            itemsHtml += `
+            <div class="${bgClass} p-3 rounded-xl border ${borderClass} shadow-sm flex items-center gap-3">
+                <div class="flex-1 min-w-0">
+                    <div class="flex justify-between items-start mb-0.5">
+                        <span class="font-bold text-slate-700 truncate pr-2 text-sm">${item.project_name}</span>
+                        <span class="font-bold text-slate-800">${item.amount.toFixed(0)} грн</span>
+                    </div>
+                    <div class="flex justify-between items-center text-xs text-slate-500">
+                        <span class="truncate pr-2">${item.description}</span>
+                        <span>${item.date ? new Date(item.date).toLocaleDateString('uk-UA') : ''}</span>
+                    </div>
+                </div>
+            </div>`;
+        });
+    }
+    
+    document.getElementById('payouts-list').innerHTML = itemsHtml;
+    openModal('user-payouts-modal');
 }
 
 // --- Navigation & Modals ---
@@ -917,23 +1012,7 @@ function closeModal(id) {
     document.getElementById(id).classList.add('hidden');
 }
 
-function renderAuthUsers() {
-    const list = document.getElementById('users-list');
-    list.innerHTML = '';
-    state.users.forEach(u => {
-        const btn = document.createElement('button');
-        btn.className = "w-full text-left px-4 py-3 mb-2 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl font-medium transition flex justify-between items-center";
-        let badge = '';
-        if (u.role === 'Підрядник' || u.role === 'Contractor') {
-            badge = `<span class="text-xs px-2 py-1 bg-slate-200 rounded-md text-slate-600">${u.has_password ? '🔒' : '⚠️'} ${u.role}</span>`;
-        } else {
-            badge = `<span class="text-xs text-slate-400">${u.has_password ? '🔒' : '⚠️'}</span>`;
-        }
-        btn.innerHTML = `<span>${u.name}</span> ${badge}`;
-        btn.onclick = () => selectUserForAuth(u);
-        list.appendChild(btn);
-    });
-}
+
 
 
 // --- Client Edit & Payment Logic ---

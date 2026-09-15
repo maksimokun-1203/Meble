@@ -105,6 +105,10 @@ def init_db():
         cursor.execute("ALTER TABLE modules ADD COLUMN drawing_path TEXT")
     except sqlite3.OperationalError:
         pass
+    try:
+        cursor.execute("ALTER TABLE modules ADD COLUMN is_paid BOOLEAN DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
 
     # Invoices Table
     cursor.execute('''
@@ -222,6 +226,18 @@ def init_db():
     # Safe column migrations for schedules
     try:
         cursor.execute("ALTER TABLE schedules ADD COLUMN assignee_ids TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    # Safe column migrations for work_logs
+    try:
+        cursor.execute("ALTER TABLE work_logs ADD COLUMN is_paid BOOLEAN DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
+    # Safe column migrations for users
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN total_paid REAL DEFAULT 0")
     except sqlite3.OperationalError:
         pass
 

@@ -38,6 +38,10 @@ class UserAuth(BaseModel):
     user_id: int
     password: str
 
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
 class PasswordChange(BaseModel):
     old_password: str
     new_password: str
@@ -206,13 +210,22 @@ def change_password(user_id: int, data: PasswordChange):
     return {"status": "success"}
 
 @app.post("/api/login")
-def login(data: UserAuth):
+def login(data: UserLogin):
     conn = get_db()
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (data.user_id,)).fetchone()
+    req_username = " ".join(data.username.split()).lower()
+    users = conn.execute("SELECT * FROM users").fetchall()
+    user = next((u for u in users if " ".join(u["name"].split()).lower() == req_username), None)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if user["password_hash"] != hash_password(data.password):
+    
+    # Автоматичне створення пароля для першого входу
+    if not user["password_hash"]:
+        hashed = hash_password(data.password)
+        conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hashed, user["id"]))
+        conn.commit()
+    elif user["password_hash"] != hash_password(data.password):
         raise HTTPException(status_code=401, detail="Invalid password")
+        
     user_dict = dict(user)
     del user_dict["password_hash"]
     return {"status": "success", "user": user_dict}
@@ -797,10 +810,33 @@ def delete_schedule(schedule_id: int):
     conn.commit()
     return {"status": "success"}
 
+@app.post("/api/modules/{module_id}/toggle_paid")
+def toggle_module_paid(module_id: int):
+    conn = get_db()
+    current = conn.execute("SELECT is_paid FROM modules WHERE id = ?", (module_id,)).fetchone()
+    if not current:
+        raise HTTPException(status_code=404, detail="Module not found")
+    new_val = 0 if current["is_paid"] else 1
+    conn.execute("UPDATE modules SET is_paid = ? WHERE id = ?", (new_val, module_id))
+    conn.commit()
+    return {"status": "success", "is_paid": new_val}
+
+@app.post("/api/work_logs/{log_id}/toggle_paid")
+def toggle_work_log_paid(log_id: int):
+    conn = get_db()
+    current = conn.execute("SELECT is_paid FROM work_logs WHERE id = ?", (log_id,)).fetchone()
+    if not current:
+        raise HTTPException(status_code=404, detail="Work log not found")
+    new_val = 0 if current["is_paid"] else 1
+    conn.execute("UPDATE work_logs SET is_paid = ? WHERE id = ?", (new_val, log_id))
+    conn.commit()
+    return {"status": "success", "is_paid": new_val}
+
 @app.get("/api/reports")
 def get_reports():
     conn = get_db()
     projects = conn.execute("SELECT id, name FROM projects WHERE status = 'Виконано'").fetchall()
+    users = conn.execute("SELECT id, name, total_paid FROM users").fetchall()
     
     report_data = {
         "completed_projects": len(projects),
@@ -808,23 +844,73 @@ def get_reports():
         "total_expenses": 0
     }
     
+    for u in users:
+        report_data["user_earnings"][u["name"]] = {
+            "id": u["id"],
+            "total_earned": 0,
+            "total_paid": u["total_paid"] if u["total_paid"] else 0,
+            "items": []
+        }
+    
     expenses = conn.execute("SELECT amount FROM expenses e JOIN projects p ON e.project_id = p.id WHERE p.status = 'Виконано'").fetchall()
     report_data["total_expenses"] = sum([e["amount"] for e in expenses])
     
     for p in projects:
         p_details = get_project(p["id"]) # No user_id, so full data
+        
         for wl in p_details["work_logs"]:
             uname = wl["user_name"]
-            if uname not in report_data["user_earnings"]: report_data["user_earnings"][uname] = 0
-            report_data["user_earnings"][uname] += wl["amount"]
+            if uname not in report_data["user_earnings"]:
+                # Fallback if user somehow deleted but still in logs
+                report_data["user_earnings"][uname] = {"id": None, "total_earned": 0, "total_paid": 0, "items": []}
+            
+            amount = wl["amount"]
+            is_paid = wl.get("is_paid", 0)
+            
+            report_data["user_earnings"][uname]["total_earned"] += amount
+                
+            report_data["user_earnings"][uname]["items"].append({
+                "type": "work_log",
+                "id": wl["id"],
+                "project_name": p["name"],
+                "description": wl["work_type"],
+                "amount": amount,
+                "is_paid": is_paid,
+                "date": wl.get("date", "")
+            })
             
         for m in p_details["modules"]:
             if m["assignee_id"]:
                 uname = m["assignee_name"]
-                if uname not in report_data["user_earnings"]: report_data["user_earnings"][uname] = 0
-                report_data["user_earnings"][uname] += m["salary_calculated"]
+                if uname not in report_data["user_earnings"]:
+                    report_data["user_earnings"][uname] = {"id": None, "total_earned": 0, "total_paid": 0, "items": []}
+                
+                amount = m["salary_calculated"]
+                is_paid = m.get("is_paid", 0)
+                
+                report_data["user_earnings"][uname]["total_earned"] += amount
+                    
+                report_data["user_earnings"][uname]["items"].append({
+                    "type": "module",
+                    "id": m["id"],
+                    "project_name": p["name"],
+                    "description": f"Модуль: {m['name']}",
+                    "amount": amount,
+                    "is_paid": is_paid,
+                    "date": "" # Modules don't have date currently
+                })
             
     return report_data
+
+class UpdatePaidModel(BaseModel):
+    amount: float
+
+@app.post("/api/users/{user_id}/update_paid")
+def update_user_paid(user_id: int, data: UpdatePaidModel):
+    conn = get_db()
+    conn.execute("UPDATE users SET total_paid = ? WHERE id = ?", (data.amount, user_id))
+    conn.commit()
+    return {"status": "success"}
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
