@@ -143,7 +143,33 @@ function finishLogin(user) {
     
     if(state.currentProject) {
         renderProjectDetails(state.currentProject);
-        if(state.currentTabCategory) renderChecklist(state.currentTabCategory);
+    }
+    
+    updateCabinetBadge();
+    
+    if(state.currentTabCategory) {
+        renderChecklist(state.currentTabCategory);
+    }
+}
+
+async function updateCabinetBadge() {
+    if (!state.currentUser) return;
+    try {
+        const tasksRes = await fetch(`${API_URL}/users/${state.currentUser.id}/tasks`);
+        if (tasksRes.ok) {
+            const tasks = await tasksRes.json();
+            const badge = document.getElementById('cab-badge');
+            if (badge) {
+                if (tasks.length > 0) {
+                    badge.textContent = tasks.length;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Badge fetch error:", e);
     }
 }
 
@@ -427,10 +453,23 @@ function renderProjectDetails(p) {
     const adminControls = document.getElementById('pd-admin-controls');
     if (isPrivileged && adminControls) {
         adminControls.classList.remove('hidden');
-        document.getElementById('pd-sales-input').value = p.sales_value || 0;
-        document.getElementById('pd-modules-input').value = p.modules_count || '';
-        document.getElementById('pd-extra-ws-input').value = p.extra_work_workshop || '';
-        document.getElementById('pd-extra-site-input').value = p.extra_work_site || '';
+        renderProducts(p.products || []);
+        
+        // Dynamically recalculate sales value based on products if they exist
+        let totalSales = 0;
+        if (p.products && p.products.length > 0) {
+            p.products.forEach(prod => {
+                if(prod.pricing_type === 'standard') {
+                    totalSales += (prod.total_price || 0) + (prod.extra_work_workshop || 0) + (prod.extra_work_site || 0);
+                } else {
+                    totalSales += (prod.product_cost || 0) + (prod.installation_cost || 0) + 
+                                  (prod.assembly_cost || 0) + (prod.design_cost || 0) + 
+                                  (prod.delivery_cost || 0) + (prod.extra_work_workshop || 0) + 
+                                  (prod.extra_work_site || 0);
+                }
+            });
+            document.getElementById('pd-sales').textContent = totalSales + ' грн';
+        }
     } else if (adminControls) {
         adminControls.classList.add('hidden');
     }
@@ -1326,8 +1365,15 @@ async function openCabinet() {
                         extra = `<p class="text-[11px] text-indigo-600 font-semibold mt-0.5"><i class="fa-regular fa-calendar mr-1"></i>${t.event_date} ${t.event_time || ''}</p>`;
                     }
                 }
+                let clickHandler = '';
+                let hoverClass = '';
+                if (t.task_type && t.task_type !== 'Модуль' && t.event_date) {
+                    clickHandler = `onclick="navigateToCalendarEvent('${t.event_date}')"`;
+                    hoverClass = 'cursor-pointer hover:bg-slate-50 transition hover:border-indigo-300 hover:shadow-md';
+                }
+                
                 tasksContainer.innerHTML += `
-                <div class="bg-white border border-slate-200 rounded-xl p-3 flex justify-between items-center shadow-xs">
+                <div ${clickHandler} class="bg-white border border-slate-200 rounded-xl p-3 flex justify-between items-center shadow-xs ${hoverClass}">
                     <div>
                         <p class="font-bold text-sm text-slate-800">${escapeHtml(t.name)}</p>
                         <p class="text-xs text-slate-500">${escapeHtml(t.project_name)}</p>
@@ -1340,6 +1386,12 @@ async function openCabinet() {
     } else {
         tasksContainer.innerHTML = '<p class="text-sm text-rose-500 italic">Помилка завантаження</p>';
     }
+}
+
+function navigateToCalendarEvent(dateStr) {
+    closeModal('cabinet-modal');
+    navigate('schedule');
+    selectCalendarDate(dateStr);
 }
 
 async function changePassword() {
@@ -1618,9 +1670,24 @@ function renderCalendar() {
                 colorCls = "bg-emerald-100 text-emerald-800 border-emerald-200 line-through opacity-75";
             }
             
-            const shortTitle = e.title.length > 12 ? e.title.substring(0, 10) + '..' : e.title;
+            let assigneesText = '';
+            if (e.assignee_ids) {
+                const ids = String(e.assignee_ids).split(',');
+                const names = ids.map(idStr => {
+                    const u = state.users.find(u => u.id.toString() === idStr.trim());
+                    if (!u) return '';
+                    return u.name.split(' ')[0]; // First name
+                }).filter(n => n);
+                if (names.length > 0) {
+                    assigneesText = ` (${names.join(', ')})`;
+                }
+            }
+            
+            const fullTitle = e.title + assigneesText;
+            const shortTitle = fullTitle.length > 15 ? fullTitle.substring(0, 14) + '..' : fullTitle;
+            
             badgesHtml += `
-            <div class="text-[9px] sm:text-[10px] font-semibold px-1 py-0.5 rounded border ${colorCls} truncate leading-tight mb-0.5" title="${escapeHtml(e.title)} (${e.event_time || ''})">
+            <div class="text-[9px] sm:text-[10px] font-semibold px-1 py-0.5 rounded border ${colorCls} truncate leading-tight mb-0.5" title="${escapeHtml(e.title)} ${escapeHtml(assigneesText)} (${e.event_time || ''})">
                 <span>${icon} ${escapeHtml(shortTitle)}</span>
             </div>`;
         });
@@ -1736,11 +1803,25 @@ function renderDayEvents(dateStr) {
             </div>
         ` : '';
         
-        const assigneeHtml = e.assignee_name ? `
+        let assigneesFullText = '';
+        if (e.assignee_ids) {
+            const ids = String(e.assignee_ids).split(',');
+            const names = ids.map(idStr => {
+                const u = state.users.find(u => u.id.toString() === idStr.trim());
+                return u ? u.name : '';
+            }).filter(n => n);
+            if (names.length > 0) assigneesFullText = names.join(', ');
+        }
+        
+        const assigneeHtml = assigneesFullText ? `
             <div class="text-xs text-slate-600 mt-1.5">
-                <span class="text-slate-400">Відповідальний:</span> <span class="font-semibold text-slate-700">${escapeHtml(e.assignee_name)}</span>
+                <span class="text-slate-400">Призначені:</span> <span class="font-semibold text-slate-700">${escapeHtml(assigneesFullText)}</span>
             </div>
-        ` : '';
+        ` : (e.assignee_name ? `
+            <div class="text-xs text-slate-600 mt-1.5">
+                <span class="text-slate-400">Створив:</span> <span class="font-semibold text-slate-700">${escapeHtml(e.assignee_name)}</span>
+            </div>
+        ` : '');
         
         const notesHtml = e.notes ? `
             <div class="mt-2 text-xs bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-700 whitespace-pre-line">
@@ -1759,7 +1840,7 @@ function renderDayEvents(dateStr) {
         const editEventData = JSON.stringify(e).replace(/'/g, "&#39;");
         
         html += `
-        <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:border-indigo-200 transition">
+        <div ondblclick='openScheduleModal(${editEventData})' class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:border-indigo-200 transition cursor-pointer select-none">
             <div class="flex justify-between items-start flex-wrap gap-2 mb-2">
                 <div class="flex items-center gap-2 flex-wrap">
                     ${typeBadge}
@@ -1814,10 +1895,14 @@ async function openScheduleModal(eventData = null, defaultDate = null) {
         projSelect.innerHTML += `<option value="${p.id}">${escapeHtml(p.name)}</option>`;
     });
     
-    const assigneeSelect = document.getElementById('sch-assignee');
-    assigneeSelect.innerHTML = '<option value="">-- Оберіть майстра --</option>';
+    const assigneeContainer = document.getElementById('sch-assignees-container');
+    assigneeContainer.innerHTML = '';
     state.users.forEach(u => {
-        assigneeSelect.innerHTML += `<option value="${u.id}">${escapeHtml(u.name)} (${u.role})</option>`;
+        assigneeContainer.innerHTML += `
+            <label class="flex items-center gap-2 cursor-pointer p-1 hover:bg-slate-100 rounded">
+                <input type="checkbox" value="${u.id}" class="sch-assignee-cb w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
+                <span>${escapeHtml(u.name)} <span class="text-xs text-slate-400">(${u.role})</span></span>
+            </label>`;
     });
     
     const deleteBtn = document.getElementById('sch-delete-btn');
@@ -1833,7 +1918,15 @@ async function openScheduleModal(eventData = null, defaultDate = null) {
         document.getElementById('sch-address').value = eventData.address || '';
         document.getElementById('sch-client-name').value = eventData.client_name || '';
         document.getElementById('sch-client-phone').value = eventData.client_phone || '';
-        assigneeSelect.value = eventData.assignee_id || '';
+        
+        const assignees = eventData.assignee_ids ? eventData.assignee_ids.split(',').map(id => id.trim()) : [];
+        if(eventData.assignee_id && !assignees.includes(eventData.assignee_id.toString())) {
+            assignees.push(eventData.assignee_id.toString());
+        }
+        document.querySelectorAll('.sch-assignee-cb').forEach(cb => {
+            cb.checked = assignees.includes(cb.value);
+        });
+        
         document.getElementById('sch-status').value = eventData.status || 'Заплановано';
         document.getElementById('sch-notes').value = eventData.notes || '';
         if (deleteBtn) deleteBtn.classList.remove('hidden');
@@ -1847,7 +1940,11 @@ async function openScheduleModal(eventData = null, defaultDate = null) {
         document.getElementById('sch-address').value = '';
         document.getElementById('sch-client-name').value = '';
         document.getElementById('sch-client-phone').value = '';
-        assigneeSelect.value = state.currentUser ? state.currentUser.id : '';
+        
+        document.querySelectorAll('.sch-assignee-cb').forEach(cb => {
+            cb.checked = state.currentUser && state.currentUser.id.toString() === cb.value;
+        });
+        
         document.getElementById('sch-status').value = 'Заплановано';
         document.getElementById('sch-notes').value = '';
         
@@ -1896,7 +1993,9 @@ async function saveScheduleEvent() {
     const address = document.getElementById('sch-address').value.trim();
     const clientName = document.getElementById('sch-client-name').value.trim();
     const clientPhone = document.getElementById('sch-client-phone').value.trim();
-    const assigneeId = document.getElementById('sch-assignee').value ? parseInt(document.getElementById('sch-assignee').value) : null;
+    
+    const assigneeIds = Array.from(document.querySelectorAll('.sch-assignee-cb:checked')).map(cb => parseInt(cb.value));
+    
     const status = document.getElementById('sch-status').value;
     const notes = document.getElementById('sch-notes').value.trim();
     
@@ -1912,7 +2011,8 @@ async function saveScheduleEvent() {
         address: address,
         client_name: clientName,
         client_phone: clientPhone,
-        assignee_id: assigneeId,
+        assignee_id: assigneeIds.length > 0 ? assigneeIds[0] : null, // legacy
+        assignee_ids: assigneeIds,
         status: status,
         notes: notes
     };
@@ -1991,6 +2091,137 @@ async function toggleScheduleDone(id, currentStatus) {
         }
     } catch (e) {
         console.error('Toggle status error:', e);
+    }
+}
+
+// --- Products Logic ---
+
+function renderProducts(products) {
+    const list = document.getElementById('pd-products-list');
+    list.innerHTML = '';
+    if (!products || products.length === 0) {
+        list.innerHTML = '<p class="text-xs text-slate-400">Виробів ще не додано</p>';
+        return;
+    }
+    
+    products.forEach(p => {
+        let total = 0;
+        if(p.pricing_type === 'standard') {
+            total = (p.total_price || 0) + (p.extra_work_workshop || 0) + (p.extra_work_site || 0);
+        } else {
+            total = (p.product_cost || 0) + (p.installation_cost || 0) + 
+                    (p.assembly_cost || 0) + (p.design_cost || 0) + 
+                    (p.delivery_cost || 0) + (p.extra_work_workshop || 0) + 
+                    (p.extra_work_site || 0);
+        }
+        
+        const card = document.createElement('div');
+        card.className = 'bg-slate-50 border border-slate-200 rounded-xl p-3 flex justify-between items-center cursor-pointer hover:bg-slate-100 transition mb-2';
+        card.innerHTML = `
+            <div>
+                <p class="font-bold text-sm text-slate-700">${escapeHtml(p.name)}</p>
+                <p class="text-xs text-slate-500">${p.pricing_type === 'standard' ? 'Стала ціна' : 'Послуги вручну'}</p>
+            </div>
+            <div class="font-bold text-indigo-700 text-sm">${total} грн</div>
+        `;
+        card.onclick = () => openProductModal(p);
+        list.appendChild(card);
+    });
+}
+
+function openProductModal(prod = null) {
+    const isNew = !prod;
+    document.getElementById('prod-modal-title').textContent = isNew ? 'Додати виріб' : 'Редагувати виріб';
+    document.getElementById('prod-id').value = isNew ? '' : prod.id;
+    document.getElementById('prod-name').value = isNew ? '' : prod.name;
+    document.getElementById('prod-pricing-type').value = isNew ? 'standard' : (prod.pricing_type || 'standard');
+    
+    document.getElementById('prod-total-price').value = isNew ? '' : (prod.total_price || 0);
+    document.getElementById('prod-cost').value = isNew ? '0' : (prod.product_cost || 0);
+    document.getElementById('prod-install').value = isNew ? '0' : (prod.installation_cost || 0);
+    document.getElementById('prod-assembly').value = isNew ? '0' : (prod.assembly_cost || 0);
+    document.getElementById('prod-design').value = isNew ? '0' : (prod.design_cost || 0);
+    document.getElementById('prod-delivery').value = isNew ? '0' : (prod.delivery_cost || 0);
+    
+    document.getElementById('prod-extra-ws').value = isNew ? '0' : (prod.extra_work_workshop || 0);
+    document.getElementById('prod-extra-site').value = isNew ? '0' : (prod.extra_work_site || 0);
+    
+    const delBtn = document.getElementById('prod-delete-btn');
+    if(delBtn) {
+        if(isNew) delBtn.classList.add('hidden');
+        else delBtn.classList.remove('hidden');
+    }
+    
+    togglePricingType();
+    openModal('product-modal');
+}
+
+function togglePricingType() {
+    const type = document.getElementById('prod-pricing-type').value;
+    if(type === 'standard') {
+        document.getElementById('prod-standard-block').classList.remove('hidden');
+        document.getElementById('prod-manual-block').classList.add('hidden');
+    } else {
+        document.getElementById('prod-standard-block').classList.add('hidden');
+        document.getElementById('prod-manual-block').classList.remove('hidden');
+    }
+}
+
+async function saveProduct() {
+    const id = document.getElementById('prod-id').value;
+    const name = document.getElementById('prod-name').value.trim();
+    if(!name) return alert('Введіть назву виробу!');
+    
+    const type = document.getElementById('prod-pricing-type').value;
+    
+    const payload = {
+        name: name,
+        pricing_type: type,
+        total_price: parseFloat(document.getElementById('prod-total-price').value) || 0,
+        product_cost: parseFloat(document.getElementById('prod-cost').value) || 0,
+        installation_cost: parseFloat(document.getElementById('prod-install').value) || 0,
+        assembly_cost: parseFloat(document.getElementById('prod-assembly').value) || 0,
+        design_cost: parseFloat(document.getElementById('prod-design').value) || 0,
+        delivery_cost: parseFloat(document.getElementById('prod-delivery').value) || 0,
+        extra_work_workshop: parseFloat(document.getElementById('prod-extra-ws').value) || 0,
+        extra_work_site: parseFloat(document.getElementById('prod-extra-site').value) || 0
+    };
+    
+    try {
+        const url = id ? `${API_URL}/products/${id}` : `${API_URL}/projects/${state.currentProject.id}/products`;
+        const method = id ? 'PUT' : 'POST';
+        
+        const res = await fetch(url, {
+            method: method,
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        
+        if (res.ok) {
+            closeModal('product-modal');
+            openProject(state.currentProject.id); // reload project
+        } else {
+            alert('Помилка при збереженні виробу');
+        }
+    } catch (e) {
+        console.error(e);
+        alert('Помилка з\'єднання');
+    }
+}
+
+async function deleteProduct() {
+    const id = document.getElementById('prod-id').value;
+    if (!id) return;
+    if (!confirm('Дійсно видалити виріб?')) return;
+    
+    try {
+        const res = await fetch(`${API_URL}/products/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+            closeModal('product-modal');
+            openProject(state.currentProject.id);
+        }
+    } catch (e) {
+        console.error(e);
     }
 }
 

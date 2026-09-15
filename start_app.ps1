@@ -1,4 +1,4 @@
-# Скрипт запуску додатку ViyarApp для PowerShell на Windows
+﻿# Скрипт запуску додатку ViyarApp для PowerShell на Windows
 $ErrorActionPreference = "Stop"
 
 Set-Location $PSScriptRoot

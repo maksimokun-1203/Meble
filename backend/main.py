@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel
 import os
 import shutil
@@ -74,6 +74,7 @@ class ScheduleCreate(BaseModel):
     client_name: Optional[str] = None
     client_phone: Optional[str] = None
     assignee_id: Optional[int] = None
+    assignee_ids: Optional[List[int]] = None
     status: Optional[str] = "Заплановано"
     notes: Optional[str] = None
 
@@ -87,6 +88,7 @@ class ScheduleUpdate(BaseModel):
     client_name: Optional[str] = None
     client_phone: Optional[str] = None
     assignee_id: Optional[int] = None
+    assignee_ids: Optional[List[int]] = None
     status: Optional[str] = None
     notes: Optional[str] = None
 
@@ -114,6 +116,30 @@ class ProjectItemCreate(BaseModel):
     category: str
     name: str
     quantity: int
+
+class ProjectProductCreate(BaseModel):
+    name: str
+    pricing_type: Optional[str] = 'standard'
+    total_price: Optional[float] = 0
+    product_cost: Optional[float] = 0
+    installation_cost: Optional[float] = 0
+    assembly_cost: Optional[float] = 0
+    design_cost: Optional[float] = 0
+    delivery_cost: Optional[float] = 0
+    extra_work_workshop: Optional[float] = 0
+    extra_work_site: Optional[float] = 0
+
+class ProjectProductUpdate(BaseModel):
+    name: Optional[str] = None
+    pricing_type: Optional[str] = None
+    total_price: Optional[float] = None
+    product_cost: Optional[float] = None
+    installation_cost: Optional[float] = None
+    assembly_cost: Optional[float] = None
+    design_cost: Optional[float] = None
+    delivery_cost: Optional[float] = None
+    extra_work_workshop: Optional[float] = None
+    extra_work_site: Optional[float] = None
 
 class ProjectItemUpdate(BaseModel):
     quantity: Optional[int] = None
@@ -238,9 +264,9 @@ def get_user_tasks(user_id: int):
         SELECT s.id, s.title as name, s.status, COALESCE(p.name, 'Індивідуально') as project_name, s.event_type as task_type, s.event_date, s.event_time
         FROM schedules s
         LEFT JOIN projects p ON s.project_id = p.id
-        WHERE s.assignee_id = ? AND s.status != 'Виконано'
+        WHERE ',' || s.assignee_ids || ',' LIKE '%,' || ? || ',%' AND s.status != 'Виконано'
         ORDER BY s.event_date ASC, s.event_time ASC
-    """, (user_id,)).fetchall()
+    """, (str(user_id),)).fetchall()
     
     return [dict(m) for m in modules] + [dict(s) for s in schedules]
 
@@ -338,6 +364,8 @@ def get_project(project_id: int, user_id: Optional[int] = None):
     project_dict["expenses"] = [dict(e) for e in expenses]
     project_dict["files"] = [dict(f) for f in files]
     project_dict["items"] = [dict(i) for i in items]
+    products = conn.execute("SELECT * FROM project_products WHERE project_id = ?", (project_id,)).fetchall()
+    project_dict["products"] = [dict(p) for p in products]
     project_dict["modules"] = [dict(m) for m in modules]
     project_dict["invoices"] = [dict(i) for i in invoices]
     project_dict["schedules"] = [dict(s) for s in schedules]
@@ -423,6 +451,37 @@ def update_project_item(project_id: int, item_id: int, data: ProjectItemUpdate):
 def delete_project_item(project_id: int, item_id: int):
     conn = get_db()
     conn.execute("DELETE FROM project_items WHERE id = ?", (item_id,))
+    conn.commit()
+    return {"status": "success"}
+
+@app.post("/api/projects/{project_id}/products")
+def add_project_product(project_id: int, data: ProjectProductCreate):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO project_products 
+        (project_id, name, pricing_type, total_price, product_cost, installation_cost, assembly_cost, design_cost, delivery_cost, extra_work_workshop, extra_work_site)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (project_id, data.name, data.pricing_type, data.total_price, data.product_cost, data.installation_cost, data.assembly_cost, data.design_cost, data.delivery_cost, data.extra_work_workshop, data.extra_work_site))
+    conn.commit()
+    return {"status": "success", "id": cursor.lastrowid}
+
+@app.put("/api/products/{product_id}")
+def update_project_product(product_id: int, data: ProjectProductUpdate):
+    conn = get_db()
+    update_data = {k: v for k, v in data.dict().items() if v is not None}
+    if update_data:
+        fields = [f"{k} = ?" for k in update_data.keys()]
+        values = list(update_data.values())
+        values.append(product_id)
+        conn.execute(f"UPDATE project_products SET {', '.join(fields)} WHERE id = ?", values)
+        conn.commit()
+    return {"status": "success"}
+
+@app.delete("/api/products/{product_id}")
+def delete_project_product(product_id: int):
+    conn = get_db()
+    conn.execute("DELETE FROM project_products WHERE id = ?", (product_id,))
     conn.commit()
     return {"status": "success"}
 
@@ -654,16 +713,21 @@ def parse_viyar_invoice(file: UploadFile = File(...)):
 
     # Branch
     branch = ""
-    if "Гавела" in text or "Лепсе" in text:
-        branch = "В.Гавела"
-    elif "Віскозна" in text:
-        branch = "Віскозна"
-    elif "Новокостянтинівська" in text or "Новокост" in text:
-        branch = "Новокостянтинівська"
-    elif "Дніпровська" in text or "Дніпронабережна" in text:
-        branch = "Дніпровська набережна"
-    elif "Бровар" in text:
-        branch = "Бровари"
+    m_branch = re.search(r'Філія:\s*(.*?)(?=\n|ЗАЯВКА|РАХУНОК|Від|Платник|\s{3,}|$)', text, re.IGNORECASE)
+    if m_branch and m_branch.group(1).strip():
+        branch = m_branch.group(1).strip()
+    
+    if not branch:
+        if "Гавела" in text or "Лепсе" in text:
+            branch = "В.Гавела"
+        elif "Віскозна" in text:
+            branch = "Віскозна"
+        elif "Новокостянтинівська" in text or "Новокост" in text:
+            branch = "Новокостянтинівська"
+        elif "Дніпровська" in text or "Дніпронабережна" in text:
+            branch = "Дніпровська набережна"
+        elif "Бровар" in text:
+            branch = "Бровари"
 
     return {
         "status": "success", 
@@ -703,10 +767,11 @@ def get_schedules(month: Optional[str] = None, event_type: Optional[str] = None,
 def create_schedule(data: ScheduleCreate):
     conn = get_db()
     cursor = conn.cursor()
+    assignee_ids_str = ','.join(map(str, data.assignee_ids)) if data.assignee_ids else None
     cursor.execute("""
-        INSERT INTO schedules (project_id, event_type, title, event_date, event_time, address, client_name, client_phone, assignee_id, status, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (data.project_id, data.event_type, data.title, data.event_date, data.event_time, data.address, data.client_name, data.client_phone, data.assignee_id, data.status or 'Заплановано', data.notes))
+        INSERT INTO schedules (project_id, event_type, title, event_date, event_time, address, client_name, client_phone, assignee_id, assignee_ids, status, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (data.project_id, data.event_type, data.title, data.event_date, data.event_time, data.address, data.client_name, data.client_phone, data.assignee_id, assignee_ids_str, data.status or 'Заплановано', data.notes))
     conn.commit()
     return {"status": "success", "id": cursor.lastrowid}
 
@@ -714,6 +779,9 @@ def create_schedule(data: ScheduleCreate):
 def update_schedule(schedule_id: int, data: ScheduleUpdate):
     conn = get_db()
     update_data = {k: v for k, v in data.dict().items() if v is not None}
+    if 'assignee_ids' in update_data:
+        update_data['assignee_ids'] = ','.join(map(str, update_data['assignee_ids']))
+        
     if update_data:
         fields = [f"{k} = ?" for k in update_data.keys()]
         values = list(update_data.values())

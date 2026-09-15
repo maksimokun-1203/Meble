@@ -148,6 +148,25 @@ def init_db():
     )
     ''')
 
+    # Project Products Table (Вироби)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS project_products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER,
+        name TEXT,
+        pricing_type TEXT DEFAULT 'standard',
+        total_price REAL DEFAULT 0,
+        product_cost REAL DEFAULT 0,
+        installation_cost REAL DEFAULT 0,
+        assembly_cost REAL DEFAULT 0,
+        design_cost REAL DEFAULT 0,
+        delivery_cost REAL DEFAULT 0,
+        extra_work_workshop REAL DEFAULT 0,
+        extra_work_site REAL DEFAULT 0,
+        FOREIGN KEY(project_id) REFERENCES projects(id)
+    )
+    ''')
+
     # Module Comments Table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS module_comments (
@@ -199,6 +218,12 @@ def init_db():
             cursor.execute(f"ALTER TABLE projects ADD COLUMN {col_def}")
         except sqlite3.OperationalError:
             pass
+
+    # Safe column migrations for schedules
+    try:
+        cursor.execute("ALTER TABLE schedules ADD COLUMN assignee_ids TEXT")
+    except sqlite3.OperationalError:
+        pass
 
     conn.commit()
     conn.close()

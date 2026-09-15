@@ -28,8 +28,9 @@
             <button id="nav-reports-btn" class="hidden text-sm font-medium text-slate-500 hover:text-indigo-600" onclick="navigate('reports')">
                 <i class="fa-solid fa-chart-pie mr-1"></i> Звіти
             </button>
-            <button id="nav-cabinet-btn" class="hidden text-sm font-medium text-slate-500 hover:text-indigo-600" onclick="openCabinet()">
-                <i class="fa-solid fa-address-card mr-1"></i> Кабінет
+            <button id="nav-cabinet-btn" class="hidden relative text-sm font-medium text-slate-500 hover:text-indigo-600" onclick="openCabinet()">
+                <i class="fa-solid fa-user-circle mr-1"></i> Кабінет <span id="cab-user-name" class="font-bold"></span>
+                <span id="cab-badge" class="hidden absolute -top-1.5 -right-2 bg-rose-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full"></span>
             </button>
             <div id="current-user-display" class="text-sm font-medium text-slate-600 hidden"></div>
             <button id="auth-btn" class="text-slate-500 hover:text-indigo-600 transition">
@@ -260,18 +261,87 @@
                     <span id="pd-modules-display" class="font-bold text-lg text-slate-800">0 шт</span>
                 </div>
                 
-                <!-- Admin Only: Project Settings -->
+                <!-- Admin Only: Project Settings (Now Products List) -->
                 <div id="pd-admin-controls" class="hidden pt-4 border-t border-slate-100 space-y-3">
-                    <h3 class="font-bold text-sm text-slate-700">Налаштування об'єкту (Admin)</h3>
-                    <div><label class="block text-xs text-slate-500">Загальна вартість (грн)</label>
-                    <input type="number" id="pd-sales-input" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1"></div>
-                    <div><label class="block text-xs text-slate-500">Кількість модулів (шт)</label>
-                    <input type="number" id="pd-modules-input" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1"></div>
-                    <div><label class="block text-xs text-slate-500">Доп. роботи (в цеху)</label>
-                    <input type="text" id="pd-extra-ws-input" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1"></div>
-                    <div><label class="block text-xs text-slate-500">Доп. роботи (на об'єкті)</label>
-                    <input type="text" id="pd-extra-site-input" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1"></div>
-                    <button onclick="updateProjectDetails()" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700">Зберегти налаштування</button>
+                    <div class="flex justify-between items-center">
+                        <h3 class="font-bold text-sm text-slate-700">Список виробів</h3>
+                        <button onclick="openProductModal()" class="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-200">+ Додати</button>
+                    </div>
+                    <div id="pd-products-list" class="space-y-2 mt-2">
+                        <!-- Products will be rendered here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product Modal -->
+            <div id="product-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+                <div class="bg-white w-full max-w-md rounded-3xl p-6 relative my-auto">
+                    <button onclick="closeModal('product-modal')" class="absolute right-4 top-4 text-slate-400 hover:text-slate-600 text-xl"><i class="fa-solid fa-xmark"></i></button>
+                    <h3 class="text-xl font-bold mb-4 text-slate-800" id="prod-modal-title">Додати виріб</h3>
+                    <input type="hidden" id="prod-id">
+                    
+                    <input type="text" id="prod-name" placeholder="Назва виробу (напр. Кухня)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-400" required>
+                    
+                    <div class="mb-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                        <label class="block text-xs font-bold text-slate-600 mb-2">Тип розрахунку цін:</label>
+                        <select id="prod-pricing-type" onchange="togglePricingType()" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none">
+                            <option value="standard">Стала ціна об'єкту</option>
+                            <option value="manual">Вказувати послуги вручну</option>
+                        </select>
+                    </div>
+
+                    <div id="prod-standard-block" class="space-y-3 mb-3">
+                        <div>
+                            <label class="block text-xs text-slate-500">Загальна стала вартість (грн)</label>
+                            <input type="number" id="prod-total-price" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                        </div>
+                    </div>
+
+                    <div id="prod-manual-block" class="space-y-3 mb-3 hidden">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-xs text-slate-500">Вартість виробу</label>
+                                <input type="number" id="prod-cost" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" value="0">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-slate-500">Монтаж</label>
+                                <input type="number" id="prod-install" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" value="0">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-slate-500">Збірка</label>
+                                <input type="number" id="prod-assembly" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" value="0">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-slate-500">Проектування</label>
+                                <input type="number" id="prod-design" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" value="0">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-slate-500">Занос / Підйом</label>
+                                <input type="number" id="prod-delivery" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" value="0">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-3 mb-4 pt-3 border-t border-slate-100">
+                        <h4 class="text-xs font-bold text-slate-600">Додаткові роботи:</h4>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-xs text-slate-500">В цеху (грн)</label>
+                                <input type="number" id="prod-extra-ws" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" value="0">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-slate-500">На об'єкті (грн)</label>
+                                <input type="number" id="prod-extra-site" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" value="0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <button type="button" id="prod-delete-btn" onclick="deleteProduct()" class="hidden py-3 px-4 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl font-bold text-sm transition">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                        <button onclick="saveProduct()" class="flex-1 bg-indigo-600 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-indigo-700">Зберегти виріб</button>
+                    </div>
                 </div>
             </div>
 
@@ -710,10 +780,10 @@
 
             <div class="grid grid-cols-2 gap-2 mb-3">
                 <div>
-                    <label class="block text-xs font-medium text-slate-500 mb-1">Відповідальний майстер</label>
-                    <select id="sch-assignee" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
-                        <option value="">-- Оберіть майстра --</option>
-                    </select>
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Відповідальні майстри</label>
+                    <div id="sch-assignees-container" class="space-y-1 max-h-24 overflow-y-auto bg-slate-50 border border-slate-200 rounded-xl p-2 text-sm">
+                        <!-- Checkboxes will be populated here -->
+                    </div>
                 </div>
                 <div>
                     <label class="block text-xs font-medium text-slate-500 mb-1">Статус</label>
@@ -740,6 +810,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=5"></script>
+    <script src="app.js?v=10"></script>
 </body>
 </html>
