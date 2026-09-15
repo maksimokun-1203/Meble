@@ -184,6 +184,40 @@ async function createContractor() {
     }
 }
 
+async function createProject() {
+    const nameInput = document.getElementById('proj-name');
+    if (!nameInput) return;
+    const name = nameInput.value.trim();
+    if (!name) return alert("Введіть назву об'єкту");
+    
+    const res = await fetch(`${API_URL}/projects`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name})
+    });
+    if (res.ok) {
+        nameInput.value = '';
+        closeModal('project-modal');
+        await loadProjectsDashboard();
+    } else {
+        alert("Помилка при створенні об'єкту");
+    }
+}
+
+async function deleteProject(id) {
+    if(!confirm("Ви впевнені, що хочете видалити цей об'єкт? Всі пов'язані дані (модулі, рахунки, витрати) будуть видалені безповоротно!")) return;
+    
+    const res = await fetch(`${API_URL}/projects/${id}`, {
+        method: 'DELETE'
+    });
+    if (res.ok) {
+        await loadProjectsDashboard();
+        openTab('main');
+    } else {
+        alert("Помилка при видаленні об'єкту");
+    }
+}
+
 async function loadProjectsDashboard() {
     document.getElementById('projects-loading').classList.remove('hidden');
     await fetchProjects();
@@ -936,6 +970,7 @@ function openUserPayoutsModal(userName) {
             if (res.ok) {
                 udata.total_paid = newPaid;
                 document.getElementById('payout-total-unpaid').innerText = (udata.total_earned - udata.total_paid).toFixed(0) + ' грн';
+                loadReports();
             }
         } catch (err) { console.error(err); }
     };

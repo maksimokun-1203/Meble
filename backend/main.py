@@ -49,6 +49,9 @@ class PasswordChange(BaseModel):
 class ContractorCreate(BaseModel):
     name: str
 
+class ProjectCreate(BaseModel):
+    name: str
+
 class ProjectUpdate(BaseModel):
     user_id: Optional[int] = None
     sales_value: Optional[float] = None
@@ -302,6 +305,33 @@ def get_module_templates():
     conn = get_db()
     items = conn.execute("SELECT * FROM module_templates").fetchall()
     return [dict(i) for i in items]
+
+@app.post("/api/projects")
+def create_project(data: ProjectCreate):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO projects (name, status) VALUES (?, 'На погодженні')", (data.name,))
+    proj_id = cursor.lastrowid
+    conn.commit()
+    return {"status": "success", "id": proj_id}
+
+@app.delete("/api/projects/{project_id}")
+def delete_project(project_id: int):
+    conn = get_db()
+    conn.execute("DELETE FROM work_logs WHERE project_id = ?", (project_id,))
+    conn.execute("DELETE FROM expenses WHERE project_id = ?", (project_id,))
+    conn.execute("DELETE FROM files WHERE project_id = ?", (project_id,))
+    conn.execute("DELETE FROM project_items WHERE project_id = ?", (project_id,))
+    conn.execute("DELETE FROM project_products WHERE project_id = ?", (project_id,))
+    modules = conn.execute("SELECT id FROM modules WHERE project_id = ?", (project_id,)).fetchall()
+    for m in modules:
+        conn.execute("DELETE FROM module_comments WHERE module_id = ?", (m["id"],))
+    conn.execute("DELETE FROM modules WHERE project_id = ?", (project_id,))
+    conn.execute("DELETE FROM viyar_invoices WHERE project_id = ?", (project_id,))
+    conn.execute("DELETE FROM schedules WHERE project_id = ?", (project_id,))
+    conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    conn.commit()
+    return {"status": "success"}
 
 @app.get("/api/projects")
 def get_projects():
